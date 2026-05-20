@@ -5,7 +5,8 @@ export function middleware(req: NextRequest) {
   const authed = req.cookies.get(PASSCODE_COOKIE)?.value === "ok";
   const isLogin =
     req.nextUrl.pathname === "/login" ||
-    req.nextUrl.pathname === "/api/login";
+    req.nextUrl.pathname === "/api/login" ||
+    req.nextUrl.pathname === "/api/enrich";
   if (!authed && !isLogin) {
     return NextResponse.redirect(new URL("/login", req.url));
   }
