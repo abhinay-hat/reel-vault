@@ -591,11 +591,13 @@ export async function listItemsNeedingExtraction(limit = 25): Promise<Item[]> {
   return rows.map(rowToItem);
 }
 
+// Every branch needs at least one text field — music-only `transcribed` rows
+// must not sit at the front of the queue forever with attempts stuck at 0.
 const ENRICH_ELIGIBLE = `
   (content_status = 'transcribed'
       or (content_status != 'unavailable'
-          and (summary is null or summary = '')
-          and (coalesce(caption,'') != '' or coalesce(transcript,'') != '' or coalesce(ocr_text,'') != '')))
+          and (summary is null or summary = '')))
+  and (coalesce(caption,'') != '' or coalesce(transcript,'') != '' or coalesce(ocr_text,'') != '')
   and coalesce(enrich_attempts, 0) < 3
 `;
 

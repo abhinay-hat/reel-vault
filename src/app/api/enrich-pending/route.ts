@@ -43,7 +43,15 @@ export async function POST(req: NextRequest) {
   let enriched = 0;
   let failed = 0;
   for (const it of pending) {
-    if (!it.caption && !it.transcript && !it.ocr_text) continue;
+    // Defensive: queue SQL already requires text; bump attempts if a row slips through.
+    if (!it.caption && !it.transcript && !it.ocr_text) {
+      failed++;
+      await updateItem(it.id, {
+        enrich_attempts: (it.enrich_attempts ?? 0) + 1,
+        content_error: "enrich: no text",
+      });
+      continue;
+    }
     try {
       const prompt = buildKnowledgePrompt({
         title: it.title,

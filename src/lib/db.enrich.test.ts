@@ -74,4 +74,49 @@ describe("enrich queue", () => {
     expect(list.find((i) => i.id === c.id)).toBeUndefined();
     expect(await countItemsNeedingEnrichment()).toBe(2);
   });
+
+  it("excludes text-less transcribed rows; keeps ocr-only rows", async () => {
+    const path = "/tmp/rv-enrich-notext.db";
+    for (const f of [path, `${path}-wal`, `${path}-shm`, `${path}-journal`]) {
+      rmSync(f, { force: true });
+    }
+    process.env.REEL_VAULT_DB = path;
+    const { upsertItem, updateItem, listItemsNeedingEnrichment, countItemsNeedingEnrichment } =
+      await import("./db");
+
+    const empty = await upsertItem({
+      url: "https://www.instagram.com/reel/EMPTY/",
+      source: "instagram",
+      title: "music only",
+      author: null,
+      thumbnail: null,
+      summary: null,
+      category: "x",
+      tags: [],
+      notes: null,
+      origin: "dm_shared",
+    });
+    const ocrOnly = await upsertItem({
+      url: "https://www.instagram.com/reel/OCR/",
+      source: "instagram",
+      title: "slide",
+      author: null,
+      thumbnail: null,
+      summary: null,
+      category: "x",
+      tags: [],
+      notes: null,
+      origin: "dm_shared",
+    });
+
+    await updateItem(empty.id, { content_status: "transcribed" });
+    await updateItem(ocrOnly.id, {
+      content_status: "transcribed",
+      ocr_text: "TOP 3 AI TOOLS",
+    });
+
+    const list = await listItemsNeedingEnrichment(10);
+    expect(list.map((i) => i.id)).toEqual([ocrOnly.id]);
+    expect(await countItemsNeedingEnrichment()).toBe(1);
+  });
 });

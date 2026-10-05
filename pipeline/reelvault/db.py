@@ -151,6 +151,15 @@ def stats(con: sqlite3.Connection) -> dict[str, Any]:
             "select count(*) from items where summary is not null and summary != ''"
         ).fetchone()[0],
     }
+    no_text = con.execute(
+        """
+        select count(*) from items
+        where content_status = 'transcribed'
+          and coalesce(caption,'') = ''
+          and coalesce(transcript,'') = ''
+          and coalesce(ocr_text,'') = ''
+        """
+    ).fetchone()[0]
     ledger = con.execute(
         """
         select monthly_usage_after, usd_reported, at
@@ -166,6 +175,7 @@ def stats(con: sqlite3.Connection) -> dict[str, Any]:
         "total": total,
         "by_status": by_status,
         "coverage": coverage,
+        "no_text": no_text,
         "apify_credit_used": credit_used,
         "free_disk_bytes": free_bytes,
     }
@@ -183,6 +193,7 @@ def print_stats(con: sqlite3.Connection) -> None:
         f"coverage: caption={c['caption']} transcript={c['transcript']} "
         f"ocr={c['ocr_text']} summary={c['summary']}"
     )
+    print(f"no text extracted: {s['no_text']}")
     if s["apify_credit_used"] is not None:
         print(f"apify credit used this cycle: ${s['apify_credit_used']:.4f}")
     free_gb = s["free_disk_bytes"] / (1024**3)
