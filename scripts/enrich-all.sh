@@ -1,32 +1,31 @@
 #!/usr/bin/env bash
-# Loop POST /api/enrich-pending until enriched=0.
+# Loop POST /api/enrich-pending until remaining=0 (or stalled).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-URL="${ENRICH_URL:-http://localhost:3210/api/enrich-pending}"
+URL="${ENRICH_URL:-http://localhost:3210/api/enrich-pending}?limit=5"
 COOKIE_ARGS=()
 
-# Passcode gate: cookie value is the literal "ok" (see src/middleware.ts).
+APP_PASSCODE=""
 if [ -f "$ROOT/.env.local" ]; then
-  # shellcheck disable=SC1091
-  set -a
-  # Read APP_PASSCODE without printing it.
   APP_PASSCODE="$(
     awk -F= '/^APP_PASSCODE=/{sub(/^APP_PASSCODE=/,""); gsub(/^["'\'']|["'\'']$/,""); print; exit}' \
       "$ROOT/.env.local" || true
   )"
-  set +a
 fi
 
 if [ -n "${APP_PASSCODE:-}" ]; then
-  COOKIE_ARGS=(-H "Cookie: rv_auth=ok")
-  echo "APP_PASSCODE set — sending rv_auth=ok cookie"
+  # Same HMAC as src/lib/passcode.ts — never print the passcode or digest source.
+  AUTH="$(printf '%s' 'rv_auth:v1' | openssl dgst -sha256 -hmac "$APP_PASSCODE" | awk '{print $NF}')"
+  COOKIE_ARGS=(-H "Cookie: rv_auth=${AUTH}")
+  echo "APP_PASSCODE set — sending HMAC rv_auth cookie"
 fi
 
 total=0
 fails=0
+stalled=0
 while true; do
-  resp="$(curl -s -w '\n%{http_code}' -X POST "$URL" "${COOKIE_ARGS[@]+"${COOKIE_ARGS[@]}"}" || true)"
+  resp="$(curl -s --max-time 900 -w '\n%{http_code}' -X POST "$URL" "${COOKIE_ARGS[@]+"${COOKIE_ARGS[@]}"}" || true)"
   body="$(echo "$resp" | sed '$d')"
   code="$(echo "$resp" | tail -n1)"
   if [ "$code" != "200" ]; then
@@ -34,18 +33,30 @@ while true; do
     echo "HTTP $code (fail $fails/3)"
     if [ "$fails" -ge 3 ]; then
       echo "Stopping after 3 consecutive failures."
-      echo "If the app uses APP_PASSCODE, ensure you are logged in or Cookie rv_auth=ok is accepted."
       exit 1
     fi
     sleep 2
     continue
   fi
   fails=0
-  enriched="$(echo "$body" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("enriched",0))' 2>/dev/null || echo 0)"
+  read -r enriched failed remaining <<<"$(echo "$body" | python3 -c '
+import sys, json
+d=json.load(sys.stdin)
+print(d.get("enriched",0), d.get("failed",0), d.get("remaining",0))
+' 2>/dev/null || echo "0 0 0")"
   total=$((total + enriched))
-  echo "enriched +$enriched  (running total $total)"
-  if [ "$enriched" = "0" ]; then
+  echo "enriched=$enriched failed=$failed remaining=$remaining  (running total $total)"
+  if [ "${remaining:-0}" = "0" ]; then
     echo "done."
     exit 0
+  fi
+  if [ "${enriched:-0}" = "0" ]; then
+    stalled=$((stalled + 1))
+    if [ "$stalled" -ge 2 ]; then
+      echo "Stopping: two consecutive calls made no progress."
+      exit 1
+    fi
+  else
+    stalled=0
   fi
 done

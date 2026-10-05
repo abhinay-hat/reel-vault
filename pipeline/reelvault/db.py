@@ -32,6 +32,7 @@ _ITEM_COLUMNS: list[tuple[str, str]] = [
     ("duration_s", "real"),
     ("music", "text"),
     ("fetcher", "text"),
+    ("enrich_attempts", "integer not null default 0"),
 ]
 
 

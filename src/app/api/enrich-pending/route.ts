@@ -1,49 +1,71 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { buildKnowledgePrompt, parseKnowledgeResponse } from "@/lib/ai";
 import { llmEnabled, llmComplete } from "@/lib/llm";
-import { updateItem, listItemsNeedingEnrichment } from "@/lib/db";
+import {
+  updateItem,
+  listItemsNeedingEnrichment,
+  countItemsNeedingEnrichment,
+} from "@/lib/db";
 
 export const maxDuration = 300;
 
 /**
  * Batch-enrich items that have extracted text but no summary yet.
  *
- * This deliberately reads only what the extraction pipeline already pulled onto
- * this machine (caption, transcript, on-screen text) instead of re-fetching the
- * page. The previous version called convertToMarkdown(url) per item, which for
- * a reel fetches an Instagram HTML shell containing no caption — so it summarised
- * nothing, for every one of the 386 DM-shared reels.
+ * Reads only locally-extracted text. Retries once on parse failure. Items that
+ * fail 3 times drop out of the queue via enrich_attempts so the rest of the
+ * vault can still progress.
  */
-export async function POST() {
+export async function POST(req: NextRequest) {
   if (!llmEnabled()) {
     return NextResponse.json(
-      { enriched: 0, reason: "LLM not configured (start local server or set GROQ_API_KEY)" },
+      {
+        enriched: 0,
+        failed: 0,
+        remaining: 0,
+        reason: "LLM not configured (start local server or set GROQ_API_KEY)",
+      },
       { status: 200 },
     );
   }
-  const pending = await listItemsNeedingEnrichment(20);
-  if (!pending.length) return NextResponse.json({ enriched: 0 });
+
+  const rawLimit = Number(req.nextUrl.searchParams.get("limit") ?? "5");
+  const limit = Math.min(20, Math.max(1, Number.isFinite(rawLimit) ? rawLimit : 5));
+  const pending = await listItemsNeedingEnrichment(limit);
+  if (!pending.length) {
+    return NextResponse.json({
+      enriched: 0,
+      failed: 0,
+      remaining: await countItemsNeedingEnrichment(),
+    });
+  }
 
   let enriched = 0;
-  const failed: string[] = [];
+  let failed = 0;
   for (const it of pending) {
-    // Nothing to read means nothing to say. Skipping keeps the item in the
-    // queue for after extraction has run, rather than burning a call to
-    // produce a summary of its own title.
     if (!it.caption && !it.transcript && !it.ocr_text) continue;
     try {
-      const text = await llmComplete(
-        buildKnowledgePrompt({
-          title: it.title,
-          caption: it.caption,
-          transcript: it.transcript,
-          onScreenText: it.ocr_text,
-        }),
-        1200,
-      );
-      const k = parseKnowledgeResponse(text);
+      const prompt = buildKnowledgePrompt({
+        title: it.title,
+        caption: it.caption,
+        transcript: it.transcript,
+        onScreenText: it.ocr_text,
+      });
+      let text = await llmComplete(prompt, 1200);
+      let k = parseKnowledgeResponse(text);
       if (!k.summary) {
-        failed.push(it.id);
+        text = await llmComplete(
+          `${prompt}\n\nRespond with ONLY the JSON object.`,
+          1200,
+        );
+        k = parseKnowledgeResponse(text);
+      }
+      if (!k.summary) {
+        failed++;
+        await updateItem(it.id, {
+          enrich_attempts: (it.enrich_attempts ?? 0) + 1,
+          content_error: "enrich: empty summary",
+        });
         continue;
       }
       const patch: Parameters<typeof updateItem>[1] = {
@@ -53,8 +75,9 @@ export async function POST() {
         entities: k.entities,
         actions: k.actions,
         content_status: "enriched",
+        content_error: null,
+        enrich_attempts: 0,
       };
-      // Placeholder DM titles become the summary's first sentence once we know it.
       if (it.title.startsWith("Shared by ") && k.summary) {
         const sentence = k.summary.split(/(?<=[.!?])\s+/)[0] || k.summary;
         patch.title = sentence.slice(0, 90);
@@ -63,8 +86,18 @@ export async function POST() {
       enriched++;
     } catch (err) {
       console.error("[/api/enrich-pending] LLM error:", err);
-      failed.push(it.id);
+      failed++;
+      const reason = err instanceof Error ? err.message : String(err);
+      await updateItem(it.id, {
+        enrich_attempts: (it.enrich_attempts ?? 0) + 1,
+        content_error: `enrich: ${reason}`.slice(0, 300),
+      });
     }
   }
-  return NextResponse.json({ enriched, failed: failed.length });
+
+  return NextResponse.json({
+    enriched,
+    failed,
+    remaining: await countItemsNeedingEnrichment(),
+  });
 }
