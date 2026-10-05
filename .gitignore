@@ -55,6 +55,11 @@ data/
 ig-bridge/.venv/
 ig_session.json
 
+# pipeline venv / tessdata / caches
+pipeline/.venv/
+pipeline/tessdata/
+pipeline/**/__pycache__/
+
 # agent skills (installed via `npx skills add`, symlinked into .claude/skills)
 /.agents/
 /.claude/skills/

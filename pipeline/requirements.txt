@@ -1,2 +1,8 @@
 requests>=2.31
-faster-whisper>=1.0.3
+pillow>=11
+pytesseract>=0.3.13
+mlx-whisper>=0.4.3 ; sys_platform == "darwin" and platform_machine == "arm64"
+mlx-lm>=0.32 ; sys_platform == "darwin" and platform_machine == "arm64"
+pyobjc-framework-Vision>=10 ; sys_platform == "darwin"
+faster-whisper>=1.0.3 ; sys_platform != "darwin"
+pytest>=8
