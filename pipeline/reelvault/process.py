@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import shutil
 import tempfile
+import time
 from pathlib import Path
 from typing import Any, Optional
 
@@ -20,7 +21,7 @@ from reelvault.media import (
     pick_later_times,
     probe,
 )
-from reelvault.ocr import merge_frame_texts, read_frame
+from reelvault.ocr import apple_vision_ocr, merge_frame_texts, tesseract_indic
 from reelvault.transcribe import transcribe as whisper_transcribe
 
 
@@ -34,6 +35,15 @@ def _keyframe_dest(item_id: str) -> Path:
     return MEDIA_DIR / name
 
 
+def delete_video_file(item_id: str) -> None:
+    """Remove downloaded mp4 if present. Used after process crashes."""
+    path = _video_dest(item_id)
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
 def process_item(
     con: Any,
     row: Any,
@@ -41,28 +51,75 @@ def process_item(
     *,
     keep_media: bool = False,
     tessdata_dir: Path,
+    caption_only_ok: bool = False,
 ) -> None:
-    """Fill transcript/ocr/keyframe; leave status transcribed or failed."""
+    """Fill transcript/ocr/keyframe; leave status transcribed or failed.
+
+    caption_only_ok: sidecar path may finish on caption alone. Apify resume
+    without a FetchResult must not mark image posts transcribed with empty OCR.
+    """
     item_id = row["id"]
     video_url = (fetched.video_url if fetched else None) or row["video"]
     image_urls = list(fetched.image_urls) if fetched and fetched.image_urls else []
 
     MEDIA_DIR.mkdir(parents=True, exist_ok=True)
+    t0 = time.time()
+    kind = "video" if video_url else ("image" if image_urls else "caption")
 
     if video_url:
-        _process_video(
+        timings = _process_video(
             con, row, video_url,
             keep_media=keep_media,
             tessdata_dir=tessdata_dir,
         )
+        _print_timing(item_id, kind, t0, timings, con)
         return
 
     if image_urls:
-        _process_images(con, row, image_urls, tessdata_dir=tessdata_dir)
+        timings = _process_images(con, row, image_urls, tessdata_dir=tessdata_dir)
+        _print_timing(item_id, kind, t0, timings, con)
         return
 
-    # No media — caption alone is a complete result.
-    save(con, item_id, content_status="transcribed", content_error=None)
+    if caption_only_ok:
+        save(con, item_id, content_status="transcribed", content_error=None)
+        _print_timing(item_id, kind, t0, {}, con)
+        return
+
+    # Apify resume without fresh FetchResult and no video URL — do not bury
+    # image posts as transcribed-with-nothing.
+    save(
+        con, item_id,
+        content_status="failed",
+        content_error="no media; re-fetch required",
+    )
+
+
+def _print_timing(
+    item_id: str,
+    kind: str,
+    t0: float,
+    timings: dict[str, float],
+    con: Any,
+) -> None:
+    total = time.time() - t0
+    row = con.execute(
+        "select ocr_text, transcript, content_status from items where id = ?",
+        (item_id,),
+    ).fetchone()
+    if not row or row["content_status"] != "transcribed":
+        return
+    ocr_n = len(row["ocr_text"] or "")
+    tr_n = len(row["transcript"] or "")
+    parts = []
+    for key in ("frames", "vision", "tesseract", "whisper"):
+        if key in timings:
+            parts.append(f"{key} {timings[key]:.0f}s")
+    detail = ", ".join(parts)
+    extra = f" ({detail})" if detail else ""
+    print(
+        f"  ✓ {item_id[:8]} {kind} {total:.0f}s{extra} "
+        f"ocr {ocr_n}ch transcript {tr_n}ch"
+    )
 
 
 def _process_video(
@@ -72,15 +129,16 @@ def _process_video(
     *,
     keep_media: bool,
     tessdata_dir: Path,
-) -> None:
+) -> dict[str, float]:
     item_id = row["id"]
     dest = _video_dest(item_id)
     video = download(video_url, dest)
     if not video:
         save(con, item_id, content_status="failed", content_error="media download failed")
-        return
+        return {}
 
     save(con, item_id, video_file=video.name)
+    timings: dict[str, float] = {}
 
     try:
         info = probe(video)
@@ -100,18 +158,36 @@ def _process_video(
 
     with tempfile.TemporaryDirectory(prefix="rv-frames-") as td:
         tdir = Path(td)
+        t_frames = time.time()
         frames = extract_frames_at(video, times, tdir) if times else []
-        texts: list[str] = []
+        timings["frames"] = time.time() - t_frames
+
+        # Vision on every sampled frame, then dedupe, then Indic on uniques only.
+        vision_texts: list[str] = []
         hashes: list[int] = []
+        t_vis = time.time()
         for _t, path in frames:
-            texts.append(read_frame(path, tessdata_dir))
+            vision_texts.append(apple_vision_ocr(path))
             hashes.append(dhash_bits(path))
-        uniq_idx, _rep = dedupe_frames(hashes, texts) if hashes else ([], [])
-        uniq_texts = [texts[i] for i in uniq_idx]
-        ocr_text = merge_frame_texts(uniq_texts)
+        timings["vision"] = time.time() - t_vis
+
+        uniq_idx, _rep = dedupe_frames(hashes, vision_texts) if hashes else ([], [])
+        merged_parts: list[str] = []
+        t_tess = time.time()
+        for i in uniq_idx:
+            path = frames[i][1]
+            parts = [vision_texts[i]]
+            indic = tesseract_indic(path, tessdata_dir)
+            if indic:
+                parts.append(indic)
+            merged_parts.append("\n".join(p for p in parts if p))
+        timings["tesseract"] = time.time() - t_tess
+        ocr_text = merge_frame_texts(merged_parts)
 
         try:
+            t_wh = time.time()
             transcript = whisper_transcribe(video)
+            timings["whisper"] = time.time() - t_wh
         except Exception as e:  # noqa: BLE001
             ocr_note = f"transcription failed: {e}"[:200]
             transcript = ""
@@ -143,6 +219,7 @@ def _process_video(
         patch["video_file"] = None
 
     save(con, item_id, **patch)
+    return timings
 
 
 def _process_images(
@@ -151,11 +228,12 @@ def _process_images(
     image_urls: list[str],
     *,
     tessdata_dir: Path,
-) -> None:
+) -> dict[str, float]:
     item_id = row["id"]
+    timings: dict[str, float] = {}
     with tempfile.TemporaryDirectory(prefix="rv-imgs-") as td:
         tdir = Path(td)
-        texts: list[str] = []
+        paths: list[Path] = []
         first: Optional[Path] = None
         for i, url in enumerate(image_urls[:10]):
             dest = tdir / f"img_{i:02d}.jpg"
@@ -164,7 +242,7 @@ def _process_images(
                 continue
             if first is None:
                 first = got
-            texts.append(read_frame(got, tessdata_dir))
+            paths.append(got)
 
         if first is None:
             save(
@@ -172,9 +250,28 @@ def _process_images(
                 content_status="failed",
                 content_error="media download failed",
             )
-            return
+            return {}
 
-        ocr_text = merge_frame_texts(texts)
+        vision_texts: list[str] = []
+        hashes: list[int] = []
+        t_vis = time.time()
+        for p in paths:
+            vision_texts.append(apple_vision_ocr(p))
+            hashes.append(dhash_bits(p))
+        timings["vision"] = time.time() - t_vis
+
+        uniq_idx, _ = dedupe_frames(hashes, vision_texts) if hashes else ([], [])
+        merged_parts: list[str] = []
+        t_tess = time.time()
+        for i in uniq_idx:
+            parts = [vision_texts[i]]
+            indic = tesseract_indic(paths[i], tessdata_dir)
+            if indic:
+                parts.append(indic)
+            merged_parts.append("\n".join(p for p in parts if p))
+        timings["tesseract"] = time.time() - t_tess
+
+        ocr_text = merge_frame_texts(merged_parts)
         kf_dest = _keyframe_dest(item_id)
         shutil.copy2(first, kf_dest)
         patch: dict[str, Any] = {
@@ -187,3 +284,4 @@ def _process_images(
         if not row["media_file"]:
             patch["media_file"] = kf_dest.name
         save(con, item_id, **patch)
+    return timings

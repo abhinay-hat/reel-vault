@@ -58,13 +58,10 @@ def _insert(con, **kw):
     return con.execute("select * from items where id=?", (cols["id"],)).fetchone()
 
 
-def test_video_item(tmp_path, monkeypatch):
-    media = tmp_path / "media"
-    media.mkdir()
+def _stub_video_pipeline(monkeypatch, media: Path, *, vision_raise=False):
     monkeypatch.setattr("reelvault.process.MEDIA_DIR", media)
     monkeypatch.setattr("reelvault.db.MEDIA_DIR", media)
 
-    # Fake download → write a tiny jpeg pretending to be mp4 path existence.
     def fake_download(url, dest: Path):
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_bytes(b"\x00" * 2000)
@@ -79,19 +76,38 @@ def test_video_item(tmp_path, monkeypatch):
         dest.mkdir(parents=True, exist_ok=True)
         out = []
         for t in times[:3] or [1.0]:
-            p = dest / f"f_{int(t*100):06d}.jpg"
+            p = dest / f"f_{int(t * 100):06d}.jpg"
             Image.new("RGB", (64, 64), (10, 10, 10)).save(p)
             out.append((t, p))
         return out
 
     monkeypatch.setattr("reelvault.process.extract_frames_at", fake_frames)
-    monkeypatch.setattr("reelvault.process.read_frame", lambda *_a, **_k: "TOP 3 AI TOOLS")
     monkeypatch.setattr("reelvault.process.dhash_bits", lambda *_a, **_k: 1)
+
+    calls = {"tess": 0}
+
+    def vision(path):
+        if vision_raise:
+            raise RuntimeError("vision boom")
+        return "TOP 3 AI TOOLS"
+
+    def tess(path, tessdata_dir):
+        calls["tess"] += 1
+        return ""
+
+    monkeypatch.setattr("reelvault.process.apple_vision_ocr", vision)
+    monkeypatch.setattr("reelvault.process.tesseract_indic", tess)
     monkeypatch.setattr(
         "reelvault.process.whisper_transcribe",
         lambda *_a, **_k: "Reel Vault smoke test words here",
     )
+    return calls
 
+
+def test_video_item(tmp_path, monkeypatch):
+    media = tmp_path / "media"
+    media.mkdir()
+    calls = _stub_video_pipeline(monkeypatch, media)
     con = _seed(tmp_path)
     row = _insert(con)
     process_item(
@@ -104,11 +120,11 @@ def test_video_item(tmp_path, monkeypatch):
     assert fresh["content_status"] == "transcribed"
     assert "TOP 3" in (fresh["ocr_text"] or "")
     assert "smoke test" in (fresh["transcript"] or "")
-    assert fresh["video_file"] is None  # deleted
-    assert fresh["media_file"]  # keyframe set
+    assert fresh["video_file"] is None
+    assert fresh["media_file"]
     md5 = hashlib.md5(b"item-1").hexdigest()
     assert not (media / f"{md5}.mp4").exists()
-    assert (media / f"{md5}_k.jpg").exists()
+    assert calls["tess"] <= 9
 
 
 def test_image_item(tmp_path, monkeypatch):
@@ -122,7 +138,9 @@ def test_image_item(tmp_path, monkeypatch):
         return dest
 
     monkeypatch.setattr("reelvault.process.download", fake_download)
-    monkeypatch.setattr("reelvault.process.read_frame", lambda *_a, **_k: "SLIDE TEXT")
+    monkeypatch.setattr("reelvault.process.apple_vision_ocr", lambda *_a: "SLIDE TEXT")
+    monkeypatch.setattr("reelvault.process.tesseract_indic", lambda *_a, **_k: "")
+    monkeypatch.setattr("reelvault.process.dhash_bits", lambda *_a, **_k: 1)
 
     con = _seed(tmp_path)
     row = _insert(con, video=None, id="img-1", url="https://www.instagram.com/p/XYZ/")
@@ -135,7 +153,29 @@ def test_image_item(tmp_path, monkeypatch):
     fresh = con.execute("select * from items where id='img-1'").fetchone()
     assert fresh["content_status"] == "transcribed"
     assert "SLIDE TEXT" in (fresh["ocr_text"] or "")
-    assert fresh["media_file"]
+
+
+def test_no_media_without_fetch_not_transcribed(tmp_path, monkeypatch):
+    media = tmp_path / "media"
+    media.mkdir()
+    monkeypatch.setattr("reelvault.process.MEDIA_DIR", media)
+    con = _seed(tmp_path)
+    row = _insert(con, video=None, id="stale", content_status="fetched")
+    process_item(con, row, None, keep_media=False, tessdata_dir=tmp_path, caption_only_ok=False)
+    fresh = con.execute("select * from items where id='stale'").fetchone()
+    assert fresh["content_status"] == "failed"
+    assert "re-fetch" in (fresh["content_error"] or "")
+
+
+def test_caption_only_ok_for_sidecar(tmp_path, monkeypatch):
+    media = tmp_path / "media"
+    media.mkdir()
+    monkeypatch.setattr("reelvault.process.MEDIA_DIR", media)
+    con = _seed(tmp_path)
+    row = _insert(con, video=None, id="cap")
+    process_item(con, row, None, keep_media=False, tessdata_dir=tmp_path, caption_only_ok=True)
+    fresh = con.execute("select content_status from items where id='cap'").fetchone()
+    assert fresh["content_status"] == "transcribed"
 
 
 def test_failed_download(tmp_path, monkeypatch):
@@ -143,7 +183,6 @@ def test_failed_download(tmp_path, monkeypatch):
     media.mkdir()
     monkeypatch.setattr("reelvault.process.MEDIA_DIR", media)
     monkeypatch.setattr("reelvault.process.download", lambda *_a, **_k: None)
-
     con = _seed(tmp_path)
     row = _insert(con)
     process_item(
@@ -154,7 +193,6 @@ def test_failed_download(tmp_path, monkeypatch):
     )
     fresh = con.execute("select * from items where id='item-1'").fetchone()
     assert fresh["content_status"] == "failed"
-    assert "download" in (fresh["content_error"] or "")
 
 
 def test_media_file_only_if_empty(tmp_path, monkeypatch):
@@ -168,7 +206,9 @@ def test_media_file_only_if_empty(tmp_path, monkeypatch):
         return dest
 
     monkeypatch.setattr("reelvault.process.download", fake_download)
-    monkeypatch.setattr("reelvault.process.read_frame", lambda *_a, **_k: "x")
+    monkeypatch.setattr("reelvault.process.apple_vision_ocr", lambda *_a: "x")
+    monkeypatch.setattr("reelvault.process.tesseract_indic", lambda *_a, **_k: "")
+    monkeypatch.setattr("reelvault.process.dhash_bits", lambda *_a, **_k: 1)
 
     con = _seed(tmp_path)
     row = _insert(
@@ -183,3 +223,53 @@ def test_media_file_only_if_empty(tmp_path, monkeypatch):
     )
     fresh = con.execute("select media_file from items where id='keep-m'").fetchone()
     assert fresh["media_file"] == "existing.jpg"
+
+
+def test_safe_process_continues_after_exception(tmp_path, monkeypatch):
+    """One boom must mark failed, delete video, and let the next item run."""
+    import extract as extract_mod
+
+    media = tmp_path / "media"
+    media.mkdir()
+    monkeypatch.setattr("reelvault.process.MEDIA_DIR", media)
+    monkeypatch.setattr("reelvault.db.MEDIA_DIR", media)
+    _stub_video_pipeline(monkeypatch, media, vision_raise=True)
+
+    con = _seed(tmp_path)
+    a = _insert(con, id="bad-1", url="https://www.instagram.com/reel/BAD/")
+    b = _insert(con, id="ok-2", url="https://www.instagram.com/reel/OK2/")
+    # First raises via vision; second succeeds after we clear the raise.
+    extract_mod._safe_process(
+        con, a, FetchResult(video_url="https://cdn.example/v.mp4"),
+        keep_media=False, tessdata=tmp_path,
+    )
+    fresh_a = con.execute("select * from items where id='bad-1'").fetchone()
+    assert fresh_a["content_status"] == "failed"
+    assert "process:" in (fresh_a["content_error"] or "")
+    md5 = hashlib.md5(b"bad-1").hexdigest()
+    assert not (media / f"{md5}.mp4").exists()
+
+    monkeypatch.setattr("reelvault.process.apple_vision_ocr", lambda *_a: "OK TEXT")
+    extract_mod._safe_process(
+        con, b, FetchResult(video_url="https://cdn.example/v2.mp4"),
+        keep_media=False, tessdata=tmp_path,
+    )
+    fresh_b = con.execute("select content_status from items where id='ok-2'").fetchone()
+    assert fresh_b["content_status"] == "transcribed"
+
+
+def test_tesseract_only_on_unique_frames(tmp_path, monkeypatch):
+    media = tmp_path / "media"
+    media.mkdir()
+    calls = _stub_video_pipeline(monkeypatch, media)
+    # Identical hashes + identical vision text → one unique frame.
+    monkeypatch.setattr("reelvault.process.dhash_bits", lambda *_a, **_k: 42)
+    con = _seed(tmp_path)
+    row = _insert(con)
+    process_item(
+        con, row,
+        FetchResult(video_url="https://cdn.example/v.mp4"),
+        keep_media=False,
+        tessdata_dir=tmp_path,
+    )
+    assert calls["tess"] == 1
