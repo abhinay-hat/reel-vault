@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { PASSCODE_COOKIE } from "@/lib/passcode";
+import { PASSCODE_COOKIE, isValidAuthCookie } from "@/lib/passcode";
 
-export function middleware(req: NextRequest) {
+export async function middleware(req: NextRequest) {
   // No APP_PASSCODE set -> the gate is disabled entirely.
   if (!process.env.APP_PASSCODE) {
     return NextResponse.next();
   }
-  const authed = req.cookies.get(PASSCODE_COOKIE)?.value === "ok";
+  const cookie = req.cookies.get(PASSCODE_COOKIE)?.value;
+  const authed = await isValidAuthCookie(cookie);
   const isLogin =
     req.nextUrl.pathname === "/login" ||
     req.nextUrl.pathname === "/api/login" ||
