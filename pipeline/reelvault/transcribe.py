@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 from typing import Any, Optional
 
@@ -26,13 +27,57 @@ def _load() -> tuple[str, Any]:
         pass
     from faster_whisper import WhisperModel
 
-    # Legacy size names like "small" for CPU fallback.
     size = WHISPER_MODEL
     if "/" in size:
         size = "small"
     _backend = "faster"
     _model = WhisperModel(size, device="cpu", compute_type="int8")
     return _backend, _model
+
+
+def filter_segments(segments: list[dict]) -> list[dict]:
+    """Drop no-speech / low-confidence segments."""
+    kept = []
+    for s in segments:
+        nsp = s.get("no_speech_prob")
+        alp = s.get("avg_logprob")
+        if nsp is not None and float(nsp) > 0.6:
+            continue
+        if alp is not None and float(alp) < -1.0:
+            continue
+        text = (s.get("text") or "").strip()
+        if text:
+            kept.append({**s, "text": text})
+    return kept
+
+
+def collapse_repeats(text: str) -> str:
+    """Collapse any sentence repeated 3+ times in a row to one."""
+    # Split on sentence boundaries; keep delimiters attached.
+    parts = re.split(r"(?<=[.!?])\s+", text.strip())
+    if not parts:
+        return text
+    out: list[str] = []
+    i = 0
+    while i < len(parts):
+        cur = parts[i].strip()
+        j = i + 1
+        while j < len(parts) and parts[j].strip().lower() == cur.lower():
+            j += 1
+        # 3+ identical → keep one; 2 identical → keep both (not a hallucination loop)
+        if j - i >= 3:
+            out.append(cur)
+        else:
+            out.extend(p.strip() for p in parts[i:j] if p.strip())
+        i = j
+    return " ".join(out)
+
+
+def _finalize(text: str, lang: str) -> str:
+    text = collapse_repeats(text.strip())
+    if len(text) < 15:
+        return ""
+    return f"[{lang}] {text}" if lang and lang != "en" else text
 
 
 def transcribe(video: Path) -> str:
@@ -43,16 +88,32 @@ def transcribe(video: Path) -> str:
     backend, model = _load()
     if backend == "mlx":
         repo = WHISPER_MODEL if "/" in WHISPER_MODEL else DEFAULT_MLX
-        r = model.transcribe(str(video), path_or_hf_repo=repo)
-        text = (r.get("text") or "").strip()
+        r = model.transcribe(
+            str(video),
+            path_or_hf_repo=repo,
+            condition_on_previous_text=False,
+        )
+        segs = filter_segments(list(r.get("segments") or []))
+        if segs:
+            text = " ".join(s["text"] for s in segs).strip()
+        else:
+            text = (r.get("text") or "").strip()
         lang = (r.get("language") or "").strip()
-        if len(text) < 15:
-            return ""
-        return f"[{lang}] {text}" if lang and lang != "en" else text
+        return _finalize(text, lang)
 
-    segments, info = model.transcribe(str(video))
-    text = " ".join(s.text.strip() for s in segments).strip()
-    if len(text) < 15:
-        return ""
+    segments, info = model.transcribe(
+        str(video),
+        condition_on_previous_text=False,
+        vad_filter=True,
+    )
+    raw = []
+    for s in segments:
+        raw.append({
+            "text": s.text,
+            "no_speech_prob": getattr(s, "no_speech_prob", None),
+            "avg_logprob": getattr(s, "avg_logprob", None),
+        })
+    kept = filter_segments(raw)
+    text = " ".join(s["text"].strip() for s in kept).strip()
     lang = getattr(info, "language", None) or ""
-    return f"[{lang}] {text}" if lang and lang != "en" else text
+    return _finalize(text, lang)
