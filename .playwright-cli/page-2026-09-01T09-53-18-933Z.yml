@@ -1,0 +1,147 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - link "Skip to the card" [ref=e3] [cursor=pointer]:
+      - /url: "#card"
+    - banner [ref=e4]:
+      - link "Reel Vault" [ref=e6] [cursor=pointer]:
+        - /url: /
+        - img [ref=e7]
+        - text: Reel Vault
+    - generic [ref=e10]:
+      - complementary [ref=e11]:
+        - navigation "Primary" [ref=e13]:
+          - generic [ref=e14]:
+            - generic [ref=e15]:
+              - heading "STACK CONTENTS" [level=2] [ref=e16]
+              - paragraph [ref=e17]: —
+            - list [ref=e18]:
+              - listitem [ref=e19]:
+                - link "Vault 1" [ref=e20] [cursor=pointer]:
+                  - /url: /
+                  - img [ref=e21]
+                  - generic [ref=e23]: Vault
+                  - generic [ref=e24]: "1"
+              - listitem [ref=e25]:
+                - link "Threads 2" [ref=e26] [cursor=pointer]:
+                  - /url: /messages
+                  - img [ref=e27]
+                  - generic [ref=e29]: Threads
+                  - generic [ref=e30]: "2"
+              - listitem [ref=e31]:
+                - link "Find 3" [ref=e32] [cursor=pointer]:
+                  - /url: /chat
+                  - img [ref=e33]
+                  - generic [ref=e35]: Find
+                  - generic [ref=e36]: "3"
+              - listitem [ref=e37]:
+                - link "Sync 4" [ref=e38] [cursor=pointer]:
+                  - /url: /connect
+                  - img [ref=e39]
+                  - generic [ref=e41]: Sync
+                  - generic [ref=e42]: "4"
+      - main [ref=e43]:
+        - generic [ref=e44]:
+          - generic [ref=e45]:
+            - generic [ref=e46]:
+              - generic [ref=e47]: Sync
+              - generic [ref=e48]: NOT CONNECTED
+            - generic [ref=e49]:
+              - heading "Sync Your Account" [level=1] [ref=e50]
+              - paragraph [ref=e51]: Keep your saved posts, reels, and shared content up to date.
+          - generic [ref=e52]:
+            - generic [ref=e53]:
+              - generic [ref=e54]: "?"
+              - generic [ref=e55]:
+                - paragraph [ref=e56]: Instagram account
+                - paragraph [ref=e57]: No account connected
+              - generic [ref=e58]: Not connected
+            - generic [ref=e59]:
+              - generic [ref=e60]:
+                - term [ref=e61]: Last synced
+                - definition [ref=e62]: Never
+              - generic [ref=e63]:
+                - term [ref=e64]: Next sync available
+                - definition [ref=e65]: —
+            - generic [ref=e66]:
+              - button "Sync Now" [disabled] [ref=e67]
+              - generic [ref=e68]:
+                - text: Connect a session under
+                - emphasis [ref=e69]: Account session
+                - text: to enable syncing.
+          - generic [ref=e70]:
+            - generic [ref=e72]: What gets synced
+            - list [ref=e73]:
+              - listitem [ref=e74]:
+                - generic [ref=e75]: Saved posts
+                - generic [ref=e76]: Posts you saved on Instagram, from every collection.
+              - listitem [ref=e77]:
+                - generic [ref=e78]: Saved reels
+                - generic [ref=e79]: Reels you saved, with their thumbnails and video.
+              - listitem [ref=e80]:
+                - generic [ref=e81]: DM reel shares
+                - generic [ref=e82]: Reels and posts shared into your direct messages.
+              - listitem [ref=e83]:
+                - generic [ref=e84]: Links & articles
+                - generic [ref=e85]: Links sent in DMs, saved as readable articles.
+          - generic [ref=e86]:
+            - generic [ref=e87]:
+              - generic [ref=e88]: Pictures and clips
+              - generic [ref=e89]: LOCAL COPIES
+            - generic [ref=e90]:
+              - paragraph [ref=e91]: Instagram serves pictures from links that expire. Reel Vault now copies every picture and clip onto this machine as it arrives, so they stop expiring. Run this once to pull in anything still reachable; whatever has already lapsed needs a fresh sync.
+              - button "Hold Media On This Machine" [ref=e92]
+              - paragraph
+          - generic [ref=e93]:
+            - generic [ref=e94]:
+              - generic [ref=e95]: Sync frequency
+              - generic [ref=e96]: MANUAL
+            - paragraph [ref=e98]:
+              - text: Reel Vault syncs when you press
+              - strong [ref=e99]: Sync Now
+              - text: . There is no automatic schedule.
+          - generic [ref=e100]:
+            - generic [ref=e102]: Recent syncs
+            - paragraph [ref=e103]:
+              - text: No syncs yet. The first
+              - strong [ref=e104]: Sync Now
+              - text: will show up here.
+          - generic [ref=e105]:
+            - generic [ref=e106]:
+              - generic [ref=e107]: Local helper
+              - generic [ref=e108]: CHECKING
+            - generic [ref=e109]:
+              - paragraph [ref=e110]: Asking the helper on this machine whether it is running.
+              - button "Check again" [ref=e112]
+          - paragraph [ref=e113]: Your credentials stay on this machine. The local helper handles synchronization without sending them to the Reel Vault service. Automated access is against Instagram’s terms and carries a real, if low, risk of a temporary lock — which is why the helper signs in once, reuses that session, and rate-limits itself.
+          - group [ref=e114]:
+            - generic "Sync options" [ref=e115] [cursor=pointer]
+          - group [ref=e116]:
+            - generic "Account session" [ref=e117] [cursor=pointer]
+            - generic [ref=e118]:
+              - paragraph [ref=e119]: Reel Vault needs an Instagram session on this machine before it can sync.
+              - generic [ref=e120]:
+                - paragraph [ref=e121]: Refresh with a session id
+                - paragraph [ref=e122]:
+                  - text: "On a desktop browser logged in to instagram.com: DevTools (F12) → Application → Cookies → https://www.instagram.com → copy the value of"
+                  - code [ref=e123]: sessionid
+                  - text: . This avoids the challenge and is the lower-risk path.
+                - generic [ref=e124]: Session id
+                - textbox "Session id" [ref=e125]:
+                  - /placeholder: sessionid cookie value
+                - button "Refresh Session" [disabled] [ref=e126]
+              - generic [ref=e127]:
+                - paragraph [ref=e128]: Or sign in with a password
+                - generic [ref=e129]:
+                  - generic [ref=e130]: Instagram username
+                  - textbox "Instagram username" [ref=e131]:
+                    - /placeholder: yourhandle
+                - generic [ref=e132]:
+                  - generic [ref=e133]: Password
+                  - textbox "Password" [ref=e134]:
+                    - /placeholder: Your Instagram password
+                - button "Sign In" [disabled] [ref=e135]
+    - contentinfo [ref=e136]:
+      - generic [ref=e138]:
+        - paragraph [ref=e139]: Every card stays on this machine.
+        - paragraph [ref=e140]: "Reading and writing are the same mode: open a card and type on it."
+  - alert [ref=e141]

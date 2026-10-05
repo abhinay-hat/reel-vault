@@ -1,0 +1,99 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - link "Skip to the card" [ref=e3] [cursor=pointer]:
+      - /url: "#card"
+    - banner [ref=e4]:
+      - link "Reel Vault" [ref=e6] [cursor=pointer]:
+        - /url: /
+        - img [ref=e7]
+        - text: Reel Vault
+      - generic [ref=e9]:
+        - paragraph [ref=e10]: 396 CARDS·0 DESCRIBED·SYNCED TODAY
+        - img "0 of 396 cards described" [ref=e11]
+        - link "396 blank — describe them" [ref=e60] [cursor=pointer]:
+          - /url: /connect
+    - generic [ref=e61]:
+      - complementary [ref=e62]:
+        - navigation "Primary" [ref=e64]:
+          - generic [ref=e65]:
+            - generic [ref=e66]:
+              - heading "STACK CONTENTS" [level=2] [ref=e67]
+              - paragraph [ref=e68]: 396 cards
+            - list [ref=e69]:
+              - listitem [ref=e70]:
+                - link "Vault 1" [ref=e71] [cursor=pointer]:
+                  - /url: /
+                  - img [ref=e72]
+                  - generic [ref=e74]: Vault
+                  - generic [ref=e75]: "1"
+              - listitem [ref=e76]:
+                - link "Threads 2" [ref=e77] [cursor=pointer]:
+                  - /url: /messages
+                  - img [ref=e78]
+                  - generic [ref=e80]: Threads
+                  - generic [ref=e81]: "2"
+              - listitem [ref=e82]:
+                - link "Find 3" [ref=e83] [cursor=pointer]:
+                  - /url: /chat
+                  - img [ref=e84]
+                  - generic [ref=e86]: Find
+                  - generic [ref=e87]: "3"
+              - listitem [ref=e88]:
+                - link "Sync 4" [ref=e89] [cursor=pointer]:
+                  - /url: /connect
+                  - img [ref=e90]
+                  - generic [ref=e92]: Sync
+                  - generic [ref=e93]: "4"
+      - main [ref=e94]:
+        - generic [ref=e95]:
+          - navigation "Card navigation" [ref=e96]:
+            - link "Previous card" [ref=e97] [cursor=pointer]:
+              - /url: /item/dd471bb4-abf2-4c17-a7b0-1a292ea323b5
+              - img [ref=e98]
+            - link "The whole stack" [ref=e100] [cursor=pointer]:
+              - /url: /
+              - img [ref=e101]
+            - paragraph [ref=e103]: 209 of 396
+            - link "Deal every card" [ref=e104] [cursor=pointer]:
+              - /url: /
+              - img [ref=e105]
+            - link "Next card" [ref=e107] [cursor=pointer]:
+              - /url: /item/eaf086b1-6f2e-4adb-b0da-19dd152fc6ec
+              - img [ref=e108]
+          - article [ref=e110]:
+            - generic [ref=e111]:
+              - generic [ref=e112]: Saved by you
+              - generic [ref=e113]: regreat_life
+            - generic [ref=e114]:
+              - 'heading "🥺🥺🥺 ➣Please share this with your friends 🥺❤️ . ➣Like kardo 😄❤️ . ➣Comment below 👇 #zaynsaifi #quoteoftheday #aes" [level=1] [ref=e115]'
+              - generic [ref=e118]: Your browser cannot play this clip.
+              - generic [ref=e119]:
+                - paragraph [ref=e120]: NOBODY HAS DESCRIBED THIS CARD
+                - paragraph [ref=e121]:
+                  - text: It has a picture and a link, and nothing written about it, so Find cannot match it on anything but its title.
+                  - link "Describe the blank cards" [ref=e122] [cursor=pointer]:
+                    - /url: /connect
+              - link "Open the original" [ref=e124] [cursor=pointer]:
+                - /url: https://www.instagram.com/reel/CuXVIgSJ1tr/
+          - generic [ref=e125]:
+            - generic [ref=e126]:
+              - generic [ref=e128]:
+                - img [ref=e129]
+                - text: Your hand
+              - generic [ref=e131]:
+                - generic [ref=e132]: Write on this card
+                - textbox "Write on this card" [ref=e133]:
+                  - /placeholder: Write on this card…
+                - button "Write" [disabled] [ref=e134]
+            - button "Tear out of stack" [ref=e136]
+    - contentinfo [ref=e137]:
+      - generic [ref=e138]:
+        - generic [ref=e139]:
+          - generic [ref=e140]: TRAIL
+          - 'link "🥺🥺🥺 ➣Please share this with your friends 🥺❤️ . ➣Like kardo 😄❤️ . ➣Comment below 👇 #zaynsaifi #quoteoftheday #aes" [ref=e142] [cursor=pointer]':
+            - /url: /item/97e16053-12f1-4e45-9c01-feac6bebe45f
+          - button "Wipe" [ref=e143]
+        - generic [ref=e144]:
+          - paragraph [ref=e145]: Every card stays on this machine.
+          - paragraph [ref=e146]: "Reading and writing are the same mode: open a card and type on it."
+  - alert [ref=e147]

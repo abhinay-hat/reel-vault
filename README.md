@@ -1,36 +1,63 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Reel Vault
 
-## Getting Started
+A local-first personal vault for the Instagram reels, posts, DM-shared links, and
+articles you save. Everything lives in a single SQLite file on your machine; an
+optional local-only sidecar pulls content straight from your Instagram account.
 
-First, run the development server:
+## Requirements
+
+- **Node 24+** — the data layer uses the built-in `node:sqlite` module.
+- **Python 3** — only if you use the Instagram private-API sidecar.
+
+## Getting started
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+npm run dev        # http://localhost:3210
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+On macOS you can also double-click `start-reel-vault.command`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### Optional: Instagram sidecar
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+A local FastAPI service (`ig-bridge/`) that reads your saved collections and DMs
+via Instagram's private mobile API.
 
-## Learn More
+```bash
+cd ig-bridge
+./start-bridge.command   # creates a venv, then runs on http://127.0.0.1:8765
+```
 
-To learn more about Next.js, take a look at the following resources:
+> ⚠️ The sidecar uses Instagram's **private** API (`instagrapi`). This violates
+> Instagram's Terms of Service and can get your account checkpointed or banned.
+> Use it only with your own account, at your own risk. The session never leaves
+> `127.0.0.1`.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Getting content into the vault
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+1. **Instagram sidecar** — log in and sync from `/connect`.
+2. **Instagram data export** — upload your export ZIP at `/ingest`.
+3. **Share capture** — the iOS Shortcut / PWA share target / `/bookmarklet`, or
+   add a link by hand at `/add`.
 
-## Deploy on Vercel
+Saved items are enriched (summary, category, tags) in the background by Claude
+when `ANTHROPIC_API_KEY` is set.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Configuration (`.env.local`)
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+| Var | Effect |
+|-----|--------|
+| `APP_PASSCODE` | Enables a shared-passcode gate (unset = open app) |
+| `SHARE_TOKEN` | Enables the `/api/share` capture endpoint |
+| `ANTHROPIC_API_KEY` | Enables AI enrichment |
+| `REEL_VAULT_DB` | SQLite file path (default `data/reel-vault.db`) |
+| `IG_BRIDGE_URL` | Sidecar base URL (default `http://127.0.0.1:8765`) |
+
+## Scripts
+
+```bash
+npm run dev      # dev server on :3210
+npm run build    # production build
+npm start        # production server on :3210
+npm test         # vitest run
+```

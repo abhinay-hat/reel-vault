@@ -1,27 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
-import Anthropic from "@anthropic-ai/sdk";
 import { buildEnrichPrompt, parseEnrichResponse } from "@/lib/ai";
+import { llmEnabled, llmComplete } from "@/lib/llm";
+import { convertToMarkdown } from "@/lib/ig";
 
 export async function POST(req: NextRequest) {
-  const { title, caption } = await req.json();
-  if (!process.env.ANTHROPIC_API_KEY) {
+  const { title, caption, url } = await req.json();
+  if (!llmEnabled()) {
     return NextResponse.json({ summary: "", category: "", tags: [] });
   }
   try {
-    const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-    const msg = await client.messages.create({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 300,
-      messages: [
-        { role: "user", content: buildEnrichPrompt(title ?? "", caption ?? "") },
-      ],
-    });
-    const text = msg.content
-      .filter((b) => b.type === "text")
-      .map((b) => (b as { text: string }).text)
-      .join("");
+    const content = typeof url === "string" && url ? await convertToMarkdown(url) : undefined;
+    const text = await llmComplete(
+      buildEnrichPrompt(title ?? "", caption ?? "", content),
+      300,
+    );
     return NextResponse.json(parseEnrichResponse(text));
-  } catch {
+  } catch (err) {
+    console.error("[/api/enrich] LLM error:", err);
     return NextResponse.json({ summary: "", category: "", tags: [] });
   }
 }

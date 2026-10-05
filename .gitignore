@@ -42,3 +42,20 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Instagram sidecar secrets
+ig-bridge/ig_session.json
+ig-bridge/__pycache__/
+*.pyc
+
+# local sqlite db
+data/
+
+# python venv for ig-bridge
+ig-bridge/.venv/
+ig_session.json
+
+# agent skills (installed via `npx skills add`, symlinked into .claude/skills)
+/.agents/
+/.claude/skills/
+.gstack/

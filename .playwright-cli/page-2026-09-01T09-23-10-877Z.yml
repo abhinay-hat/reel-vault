@@ -1,0 +1,96 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - link "Skip to the card" [ref=e3] [cursor=pointer]:
+      - /url: "#card"
+    - banner [ref=e4]:
+      - link "Reel Vault" [ref=e6] [cursor=pointer]:
+        - /url: /
+        - img [ref=e7]
+        - text: Reel Vault
+    - generic [ref=e10]:
+      - complementary [ref=e11]:
+        - navigation "Primary" [ref=e13]:
+          - generic [ref=e14]:
+            - generic [ref=e15]:
+              - heading "STACK CONTENTS" [level=2] [ref=e16]
+              - paragraph [ref=e17]: —
+            - list [ref=e18]:
+              - listitem [ref=e19]:
+                - link "Vault 1" [ref=e20] [cursor=pointer]:
+                  - /url: /
+                  - img [ref=e21]
+                  - generic [ref=e23]: Vault
+                  - generic [ref=e24]: "1"
+              - listitem [ref=e25]:
+                - link "Threads 2" [ref=e26] [cursor=pointer]:
+                  - /url: /messages
+                  - img [ref=e27]
+                  - generic [ref=e29]: Threads
+                  - generic [ref=e30]: "2"
+              - listitem [ref=e31]:
+                - link "Find 3" [ref=e32] [cursor=pointer]:
+                  - /url: /chat
+                  - img [ref=e33]
+                  - generic [ref=e35]: Find
+                  - generic [ref=e36]: "3"
+              - listitem [ref=e37]:
+                - link "Sync 4" [ref=e38] [cursor=pointer]:
+                  - /url: /connect
+                  - img [ref=e39]
+                  - generic [ref=e41]: Sync
+                  - generic [ref=e42]: "4"
+      - main [ref=e43]:
+        - generic [ref=e44]:
+          - navigation "Card navigation" [ref=e45]:
+            - img [ref=e47]
+            - link "The whole stack" [ref=e49] [cursor=pointer]:
+              - /url: /
+              - img [ref=e50]
+            - paragraph [ref=e52]: 1 of 198
+            - link "Deal every card" [ref=e53] [cursor=pointer]:
+              - /url: /
+              - img [ref=e54]
+            - link "Next card" [ref=e56] [cursor=pointer]:
+              - /url: /item/d5c8369d-e48c-4dfa-a2a4-5b69e82f630f
+              - img [ref=e57]
+          - article [ref=e59]:
+            - generic [ref=e60]:
+              - generic [ref=e61]: Shared in a thread
+              - generic [ref=e62]: "7456093337"
+            - generic [ref=e63]:
+              - heading "bestapps.ai Comment RED PILL and we’ll DM you the full setup guide for all 10. These 10 open source repos have a combin" [level=1] [ref=e64]
+              - img "Picture expired" [ref=e66]:
+                - img [ref=e67]
+                - generic [ref=e69]: PICTURE EXPIRED
+              - generic [ref=e70]:
+                - paragraph [ref=e71]: NOBODY HAS DESCRIBED THIS CARD
+                - paragraph [ref=e72]:
+                  - text: It has a picture and a link, and nothing written about it, so Find cannot match it on anything but its title.
+                  - link "Describe the blank cards" [ref=e73] [cursor=pointer]:
+                    - /url: /connect
+              - link "Open the original" [ref=e75] [cursor=pointer]:
+                - /url: https://www.instagram.com/p/DZPtLuHDOl2/?carousel_share_child_media_id=3913544893224648289_67976691897&is_sponsored=false&is_ineligible_for_clips_chaining=false
+          - generic [ref=e76]:
+            - generic [ref=e77]:
+              - generic [ref=e79]:
+                - img [ref=e80]
+                - text: Your hand
+              - generic [ref=e82]:
+                - generic [ref=e83]: Write on this card
+                - textbox "Write on this card" [ref=e84]:
+                  - /placeholder: Write on this card…
+                - button "Write" [disabled] [ref=e85]
+            - button "Tear out of stack" [ref=e87]
+    - contentinfo [ref=e88]:
+      - generic [ref=e89]:
+        - generic [ref=e90]:
+          - generic [ref=e91]: TRAIL
+          - link "bestapps.ai Comment RED PILL and we’ll DM you the full setup guide for all 10. These 10 open source repos have a combin" [ref=e93] [cursor=pointer]:
+            - /url: /item/c2f16969-a6df-497e-8d57-70314fc09313
+          - button "Wipe" [ref=e94]
+        - generic [ref=e95]:
+          - paragraph [ref=e96]: Every card stays on this machine.
+          - paragraph [ref=e97]: "Reading and writing are the same mode: open a card and type on it."
+  - button "Open Next.js Dev Tools" [ref=e103] [cursor=pointer]:
+    - img [ref=e104]
+  - alert [ref=e107]

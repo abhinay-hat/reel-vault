@@ -1,65 +1,123 @@
-import Image from "next/image";
+import Link from "next/link";
+import { listItems, searchItems, type Item } from "@/lib/db";
+import Shell from "@/components/Shell";
+import SearchBar from "@/components/SearchBar";
+import { ItemGrid } from "@/components/ItemGrid";
+import { EmptyState } from "@/components/EmptyState";
+import RefreshButton from "@/components/RefreshButton";
+import { BUTTON_SMALL, PANEL_HEADER } from "@/components/stack";
 
-export default function Home() {
+export default async function Dashboard({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string; category?: string }>;
+}) {
+  const { q, category } = await searchParams;
+
+  let items: Item[] = [];
+  let categories: string[] = [];
+  let total = 0;
+  let unreachable = false;
+
+  try {
+    const all = await listItems();
+    total = all.length;
+    categories = Array.from(new Set(all.map((i) => i.category).filter(Boolean))).sort();
+    items = q?.trim() ? await searchItems(q) : await listItems(category);
+  } catch {
+    unreachable = true;
+  }
+
+  const activeQuery = q?.trim() ?? "";
+  const dealt = activeQuery
+    ? `Found: ${activeQuery}`
+    : category
+      ? `Deal: ${category}`
+      : "The whole stack";
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <Shell cardCount={unreachable ? null : total}>
+      <div className="space-y-5">
+        <div className="hand bg-paper">
+          <div className={PANEL_HEADER}>
+            <span>{dealt}</span>
+            <span className="tabular">
+              {unreachable ? "—" : `${items.length} of ${total}`}
+            </span>
+          </div>
+
+          <div className="space-y-3 px-3 py-3">
+            <SearchBar defaultValue={activeQuery} category={category ?? ""} />
+
+            {!unreachable && categories.length > 0 ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <Link
+                  href="/"
+                  aria-current={!category && !activeQuery ? "true" : undefined}
+                  className={
+                    !category && !activeQuery
+                      ? "font-display hand bg-ink px-2.5 py-1 text-[12px] text-paper"
+                      : BUTTON_SMALL
+                  }
+                >
+                  All
+                </Link>
+                {categories.map((c) => {
+                  const active = category === c && !activeQuery;
+                  return (
+                    <Link
+                      key={c}
+                      href={`/?category=${encodeURIComponent(c)}`}
+                      aria-current={active ? "true" : undefined}
+                      className={
+                        active
+                          ? "font-display hand bg-ink px-2.5 py-1 text-[12px] text-paper"
+                          : BUTTON_SMALL
+                      }
+                    >
+                      {c}
+                    </Link>
+                  );
+                })}
+                <span className="ml-auto">
+                  {!unreachable ? <RefreshButton /> : null}
+                </span>
+              </div>
+            ) : null}
+
+            {activeQuery && !unreachable ? (
+              <p className="text-[13px]">
+                {items.length === 0
+                  ? `No card matches “${activeQuery}”.`
+                  : `${items.length} ${items.length === 1 ? "card" : "cards"} match “${activeQuery}”.`}{" "}
+                <Link
+                  href="/"
+                  className="font-display underline decoration-2 underline-offset-2 hover:bg-ink hover:text-paper hover:no-underline"
+                >
+                  Deal the whole stack again
+                </Link>
+              </p>
+            ) : null}
+          </div>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+
+        {unreachable ? (
+          <EmptyState
+            title="The stack will not open"
+            description={
+              <>
+                The local database could not be read. Reel Vault needs Node 24 or
+                newer for its built-in <code>node:sqlite</code>. Check the server
+                log, then load this card again.
+              </>
+            }
+          />
+        ) : (
+          <div className="dissolve">
+            <ItemGrid items={items} />
+          </div>
+        )}
+      </div>
+    </Shell>
   );
 }
