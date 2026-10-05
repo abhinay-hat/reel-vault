@@ -37,6 +37,27 @@ class FetchError(Exception):
     pass
 
 
+# Permanent Instagram outcomes — everything else is retryable (`failed`).
+_PERMANENT_MARKERS = (
+    "not found",
+    "doesn't exist",
+    "does not exist",
+    "removed",
+    "deleted",
+    "private",
+    "restricted",
+    "unavailable",
+)
+
+
+def classify_apify_error(message: str) -> str:
+    """Return 'unavailable' for permanent failures, else 'failed'."""
+    low = (message or "").lower()
+    if any(m in low for m in _PERMANENT_MARKERS):
+        return "unavailable"
+    return "failed"
+
+
 @dataclass
 class FetchResult:
     caption: Optional[str] = None
@@ -229,12 +250,13 @@ def fetch_batch(
     dry_run: bool = False,
     session: Optional[requests.Session] = None,
     limits: Optional[dict] = None,
-) -> dict[str, FetchResult]:
-    """Normalise, guardrail, run, ledger, apply. Returns shortcode → FetchResult.
+) -> tuple[dict[str, FetchResult], dict[str, int]]:
+    """Normalise, guardrail, run, ledger, apply.
 
+    Returns (shortcode → FetchResult, counts{fetched,failed,unavailable}).
     On dry_run: no POST. Raises GuardrailError / FetchError on hard stops.
     """
-    # Build clean URL list, dedupe by shortcode, keep row mapping.
+    counts = {"fetched": 0, "failed": 0, "unavailable": 0}
     by_code: dict[str, list[Any]] = {}
     clean_urls: list[str] = []
     for row in rows:
@@ -246,6 +268,7 @@ def fetch_batch(
                 content_status="unavailable",
                 content_error="not an Instagram reel/post URL",
             )
+            counts["unavailable"] += 1
             continue
         _kind, code, clean = norm
         if code not in by_code:
@@ -254,10 +277,10 @@ def fetch_batch(
         by_code[code].append(row)
 
     if not clean_urls:
-        return {}
+        return {}, counts
 
     if dry_run:
-        return {}
+        return {}, counts
 
     lim = limits if limits is not None else fetch_apify_limits(token, session=session)
     ok, reason = can_run_batch(lim, len(clean_urls))
@@ -267,7 +290,6 @@ def fetch_batch(
 
     items, summary = run_batch(clean_urls, token, cap, session=session)
 
-    # Index results by shortcode (and by path from url).
     results_by_code: dict[str, dict] = {}
     for it in items:
         code = it.get("shortCode")
@@ -277,7 +299,6 @@ def fetch_batch(
         if code:
             results_by_code[code] = it
 
-    # Fresh limits for ledger.
     try:
         after = fetch_apify_limits(token, session=session)
         monthly_after = credit_used(after)
@@ -298,27 +319,26 @@ def fetch_batch(
     for code, code_rows in by_code.items():
         it = results_by_code.get(code)
         if not it:
-            fr = FetchResult(error="not returned by Apify", shortcode=code)
+            fr = FetchResult(error="apify: not returned", shortcode=code)
             for row in code_rows:
                 db.save(
                     con,
                     row["id"],
-                    content_status="unavailable",
-                    content_error="not returned by Apify",
+                    content_status="failed",
+                    content_error="apify: not returned",
                 )
+                counts["failed"] += 1
             out[code] = fr
             continue
 
         fr = map_item(it)
         out[code] = fr
         if fr.error:
+            status = classify_apify_error(fr.error)
+            err = f"apify: {fr.error}"[:300]
             for row in code_rows:
-                db.save(
-                    con,
-                    row["id"],
-                    content_status="unavailable",
-                    content_error=fr.error[:300],
-                )
+                db.save(con, row["id"], content_status=status, content_error=err)
+                counts[status] += 1
             continue
 
         for row in code_rows:
@@ -343,5 +363,7 @@ def fetch_batch(
             if fr.caption and (not title or title.startswith("Shared by ")):
                 patch["title"] = fr.caption.splitlines()[0][:120]
             db.save(con, row["id"], **patch)
+            counts["fetched"] += 1
 
-    return out
+    return out, counts
+

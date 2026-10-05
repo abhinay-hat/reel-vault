@@ -204,8 +204,9 @@ def test_fetch_batch_title_thumbnail_ledger(tmp_path, monkeypatch):
         "videoDuration": 8,
     }]
     sess = FakeSession(items=items)
-    out = fetch_batch(con, [row], "tok", dry_run=False, session=sess)
+    out, counts = fetch_batch(con, [row], "tok", dry_run=False, session=sess)
     assert "DY4ZdXVP1qa" in out
+    assert counts["fetched"] == 1
     fresh = con.execute("select * from items where id='id1'").fetchone()
     assert fresh["content_status"] == "fetched"
     assert fresh["fetcher"] == "apify"
@@ -246,14 +247,38 @@ def test_thumbnail_only_if_empty(tmp_path, monkeypatch):
     assert fresh["thumbnail"] == "https://already/here.jpg"
 
 
-def test_missing_item_unavailable(tmp_path, monkeypatch):
+def test_missing_item_failed_retryable(tmp_path, monkeypatch):
     monkeypatch.setattr("reelvault.fetch_apify.time.sleep", lambda *_a, **_k: None)
     con = _seed(tmp_path)
     row = _row(con)
-    fetch_batch(con, [row], "tok", dry_run=False, session=FakeSession(items=[]))
+    _out, counts = fetch_batch(con, [row], "tok", dry_run=False, session=FakeSession(items=[]))
+    fresh = con.execute("select * from items where id='id1'").fetchone()
+    assert fresh["content_status"] == "failed"
+    assert fresh["content_error"] == "apify: not returned"
+    assert counts["failed"] == 1
+
+
+def test_permanent_error_unavailable(tmp_path, monkeypatch):
+    monkeypatch.setattr("reelvault.fetch_apify.time.sleep", lambda *_a, **_k: None)
+    con = _seed(tmp_path)
+    row = _row(con)
+    items = [{"shortCode": "DY4ZdXVP1qa", "error": "Media not found", "errorDescription": "Post deleted"}]
+    _out, counts = fetch_batch(con, [row], "tok", dry_run=False, session=FakeSession(items=items))
     fresh = con.execute("select * from items where id='id1'").fetchone()
     assert fresh["content_status"] == "unavailable"
-    assert "not returned" in (fresh["content_error"] or "")
+    assert counts["unavailable"] == 1
+
+
+def test_transient_error_failed(tmp_path, monkeypatch):
+    monkeypatch.setattr("reelvault.fetch_apify.time.sleep", lambda *_a, **_k: None)
+    con = _seed(tmp_path)
+    row = _row(con)
+    items = [{"shortCode": "DY4ZdXVP1qa", "error": "rate_limit", "errorDescription": "try again later"}]
+    _out, counts = fetch_batch(con, [row], "tok", dry_run=False, session=FakeSession(items=items))
+    fresh = con.execute("select * from items where id='id1'").fetchone()
+    assert fresh["content_status"] == "failed"
+    assert fresh["content_error"].startswith("apify:")
+    assert counts["failed"] == 1
 
 
 def test_guardrail_refusal_no_post(tmp_path):
