@@ -68,7 +68,7 @@ Additive migration applied to `data/reel-vault.db` (expected). DB backup skipped
 |---|---|
 | `pipeline/.venv` | ~1.2 GB |
 | `~/.cache/huggingface` | ~2.6 GB (whisper-small + Qwen3-4B) |
-| Free on data volume after smokes | ~13 GB |
+| Free on data volume after smokes | ~8 GB (was ~13 GB before Qwen download) |
 
 ## Open issues
 
