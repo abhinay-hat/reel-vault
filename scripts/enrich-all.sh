@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Loop POST /api/enrich-pending until remaining=0 (or stalled).
+# Loop POST /api/enrich-pending until remaining=0 (or stalled / ceiling).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-URL="${ENRICH_URL:-http://localhost:3210/api/enrich-pending}?limit=5"
+LIMIT="${ENRICH_LIMIT:-5}"
+URL="${ENRICH_URL:-http://localhost:3210/api/enrich-pending}?limit=${LIMIT}"
 COOKIE_ARGS=()
 
 APP_PASSCODE=""
@@ -21,9 +22,13 @@ if [ -n "${APP_PASSCODE:-}" ]; then
   echo "APP_PASSCODE set — sending HMAC rv_auth cookie"
 fi
 
-total=0
+total_enriched=0
+total_failed=0
 fails=0
 stalled=0
+calls=0
+max_calls=""
+
 while true; do
   resp="$(curl -s --max-time 900 -w '\n%{http_code}' -X POST "$URL" "${COOKIE_ARGS[@]+"${COOKIE_ARGS[@]}"}" || true)"
   body="$(echo "$resp" | sed '$d')"
@@ -33,30 +38,55 @@ while true; do
     echo "HTTP $code (fail $fails/3)"
     if [ "$fails" -ge 3 ]; then
       echo "Stopping after 3 consecutive failures."
+      echo "totals: enriched=$total_enriched failed=$total_failed remaining=?"
       exit 1
     fi
     sleep 2
     continue
   fi
   fails=0
+  calls=$((calls + 1))
   read -r enriched failed remaining <<<"$(echo "$body" | python3 -c '
 import sys, json
 d=json.load(sys.stdin)
 print(d.get("enriched",0), d.get("failed",0), d.get("remaining",0))
 ' 2>/dev/null || echo "0 0 0")"
-  total=$((total + enriched))
-  echo "enriched=$enriched failed=$failed remaining=$remaining  (running total $total)"
+  total_enriched=$((total_enriched + enriched))
+  total_failed=$((total_failed + failed))
+  echo "enriched=$enriched failed=$failed remaining=$remaining  (running enriched $total_enriched)"
+
+  # Ceiling from remaining at first successful response.
+  if [ -z "$max_calls" ]; then
+    # ceil(remaining / limit) * 4 + 10; remaining here is post-call, so use
+    # remaining + enriched + failed as a stand-in for start size when calls==1.
+    start=$((remaining + enriched + failed))
+    if [ "$start" -lt 1 ]; then start=1; fi
+    batches=$(( (start + LIMIT - 1) / LIMIT ))
+    max_calls=$(( batches * 4 + 10 ))
+    echo "call ceiling: $max_calls (start≈$start, limit=$LIMIT)"
+  fi
+
   if [ "${remaining:-0}" = "0" ]; then
     echo "done."
+    echo "totals: enriched=$total_enriched failed=$total_failed remaining=0"
     exit 0
   fi
-  if [ "${enriched:-0}" = "0" ]; then
+
+  # Stall only when nothing was enriched *and* nothing failed (failures still progress attempts).
+  if [ "${enriched:-0}" = "0" ] && [ "${failed:-0}" = "0" ]; then
     stalled=$((stalled + 1))
     if [ "$stalled" -ge 2 ]; then
-      echo "Stopping: two consecutive calls made no progress."
+      echo "Stopping: two consecutive calls made no progress (enriched=0 and failed=0)."
+      echo "totals: enriched=$total_enriched failed=$total_failed remaining=$remaining"
       exit 1
     fi
   else
     stalled=0
+  fi
+
+  if [ "$calls" -ge "$max_calls" ]; then
+    echo "Stopping: call ceiling $max_calls reached."
+    echo "totals: enriched=$total_enriched failed=$total_failed remaining=$remaining"
+    exit 1
   fi
 done
