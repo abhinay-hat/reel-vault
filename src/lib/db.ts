@@ -144,6 +144,7 @@ function db(): DatabaseSync {
     "alter table items add column duration_s real",
     "alter table items add column music text",
     "alter table items add column fetcher text",
+    "alter table items add column enrich_attempts integer not null default 0",
   ]) {
     try {
       d.exec(col);
@@ -204,6 +205,8 @@ export interface Item {
   music: string | null;
   /** Which fetcher filled caption/video: apify | sidecar. */
   fetcher: string | null;
+  /** How many enrich attempts have failed; ≥3 drops out of the queue. */
+  enrich_attempts: number;
 }
 
 /**
@@ -246,7 +249,7 @@ export type NewItem = Omit<
   | "id" | "created_at" | "poster" | "clip" | "media_file" | "video" | "video_file"
   | "caption" | "transcript" | "ocr_text" | "entities" | "actions"
   | "content_status" | "content_error"
-  | "keyframe_file" | "duration_s" | "music" | "fetcher"
+  | "keyframe_file" | "duration_s" | "music" | "fetcher" | "enrich_attempts"
 > & {
   created_at?: string;
   media_file?: string | null;
@@ -263,6 +266,7 @@ export type NewItem = Omit<
   duration_s?: number | null;
   music?: string | null;
   fetcher?: string | null;
+  enrich_attempts?: number;
 };
 
 interface ItemRow {
@@ -275,6 +279,7 @@ interface ItemRow {
   content_status: string; content_error: string | null;
   keyframe_file: string | null; duration_s: number | null;
   music: string | null; fetcher: string | null;
+  enrich_attempts: number;
 }
 
 function rowToItem(r: ItemRow): Item {
@@ -313,6 +318,7 @@ function rowToItem(r: ItemRow): Item {
     duration_s: r.duration_s ?? null,
     music: r.music ?? null,
     fetcher: r.fetcher ?? null,
+    enrich_attempts: r.enrich_attempts ?? 0,
   };
 }
 
@@ -585,19 +591,33 @@ export async function listItemsNeedingExtraction(limit = 25): Promise<Item[]> {
   return rows.map(rowToItem);
 }
 
+const ENRICH_ELIGIBLE = `
+  (content_status = 'transcribed'
+      or (content_status != 'unavailable'
+          and (summary is null or summary = '')
+          and (coalesce(caption,'') != '' or coalesce(transcript,'') != '' or coalesce(ocr_text,'') != '')))
+  and coalesce(enrich_attempts, 0) < 3
+`;
+
 /** Items with extracted text but no summary yet — the enricher's queue. */
 export async function listItemsNeedingEnrichment(limit = 20): Promise<Item[]> {
   const rows = db()
     .prepare(
       `select * from items
-       where content_status = 'transcribed'
-          or (content_status != 'unavailable'
-              and (summary is null or summary = '')
-              and (coalesce(caption,'') != '' or coalesce(transcript,'') != '' or coalesce(ocr_text,'') != ''))
+       where ${ENRICH_ELIGIBLE}
+       order by coalesce(enrich_attempts, 0) asc, added_at desc
        limit ?`,
     )
     .all(limit) as unknown as ItemRow[];
   return rows.map(rowToItem);
+}
+
+/** How many items are still eligible for enrichment (attempts < 3). */
+export async function countItemsNeedingEnrichment(): Promise<number> {
+  const row = db()
+    .prepare(`select count(*) as n from items where ${ENRICH_ELIGIBLE}`)
+    .get() as { n: number };
+  return row?.n ?? 0;
 }
 
 /** Every distinct entity in the vault, most-referenced first. Powers "list every anime I saved". */
