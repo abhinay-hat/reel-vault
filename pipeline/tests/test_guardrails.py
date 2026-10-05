@@ -28,6 +28,11 @@ def test_assert_free_plan_rejects_paid():
         g.assert_free_plan(_limits(0, max_usd=5.01))
 
 
+def test_assert_free_plan_fail_closed_on_missing():
+    with pytest.raises(g.GuardrailError, match="Could not read Apify plan limits"):
+        g.assert_free_plan({"data": {"limits": {}}})
+
+
 def test_credit_boundary():
     # Spec: estimate = n*0.003 + 0.001. 15 → $0.046.
     # 4.46 + 0.046 = 4.506 > 4.50 → refuse; 4.40 + 0.046 = 4.446 → allow.
