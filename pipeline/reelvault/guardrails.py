@@ -50,7 +50,9 @@ def assert_free_plan(limits: dict) -> None:
     lim = data.get("limits") or {}
     max_usd = lim.get("maxMonthlyUsageUsd")
     if max_usd is None:
-        return
+        raise GuardrailError(
+            "Could not read Apify plan limits; refusing to run."
+        )
     if float(max_usd) > 5:
         raise GuardrailError(
             f"Apify account is on a paid plan (maxMonthlyUsageUsd={max_usd}). "
