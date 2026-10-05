@@ -23,8 +23,8 @@ Anthropic vision path removed from `pipeline/`. Default fetcher is Apify Free; s
 
 | Suite | Result |
 |---|---|
-| `pytest pipeline/tests` | **33 passed** |
-| `npm test` (vitest) | **37 passed** (7 files) |
+| `pytest pipeline/tests` | **33 passed** (Phase 1); **43** after Round 1 |
+| `npm test` (vitest) | **37 passed** (Phase 1); **42** after Round 1 |
 | `npx tsc --noEmit` | **clean** |
 | `grep -rni anthropic pipeline/` (excl. `.venv`) | nothing |
 | `grep -rn llama-3.3 src/` | nothing |
@@ -118,6 +118,23 @@ Reviewed at `72d7c44`; fixes on branch tip after `phase1-fix:*` commits.
 - Synthetic floor ≈ 6 s/item → ~0.6 h compute only (unrealistic for real reels).
 - Realistic with longer clips + Apify: **~30–60 s/item** → **about 3–6.5 hours** wall clock for extract, then enrich at ~7–27 s/item for local Qwen (~1–3 h for 386).
 - OCR no longer dominates (Vision-once + Indic on uniques).
+
+## Round 2 fixes (2026-10-06)
+
+| # | Change |
+|---|---|
+| 1 | `ENRICH_ELIGIBLE` requires caption/transcript/ocr; text-less `transcribed` excluded; `--stats` prints `no text extracted: N`; defensive route bump |
+| 2 | `enrich-all.sh` stalls only when `enriched==0` **and** `failed==0`; call ceiling `ceil(start/limit)*4+10`; end totals printed |
+
+### Round 2 test counts
+
+| Suite | Result |
+|---|---|
+| pytest | **44 passed** |
+| vitest | **43 passed** (10 files) |
+| tsc | clean |
+
+Extraction ready for first real 10-reel run. Land these before full-vault `scripts/enrich-all.sh`.
 
 ## Owner next commands
 
