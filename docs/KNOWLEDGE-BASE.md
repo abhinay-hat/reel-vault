@@ -11,13 +11,13 @@ This is the path from links to a knowledge base you can ask questions of.
   reel URL                                    (what you had)
      |
      |  1. pipeline/extract.py
-     |     caption  <- sidecar, one reel at a time, paced
-     |     transcript <- Whisper, local, free
-     |     ocr_text <- keyframes read by a vision model
+     |     caption + media URL  <- Apify Free (no card)
+     |     transcript           <- mlx-whisper, local, free
+     |     ocr_text             <- Apple Vision + Tesseract (hin/tel)
      v
   raw text on this machine
      |
-     |  2. POST /api/enrich-pending
+     |  2. POST /api/enrich-pending  (local Qwen3-4B via mlx_lm.server)
      |     summary, category, tags
      |     entities  <- the films, portals, models, universities by name
      |     actions   <- what the reel asks you to do
@@ -32,52 +32,53 @@ This is the path from links to a knowledge base you can ask questions of.
 ## One-time setup
 
 ```bash
-# system dependency — frame + audio handling
-brew install ffmpeg
+# installs ffmpeg, tesseract, Python 3.12 venv, mlx packages, hin/tel tessdata
+./pipeline/setup.sh
 
-# python side of the pipeline
-pip3 install -r pipeline/requirements.txt
+# free Apify account with no card attached — paste the token once
+# APIFY_TOKEN=apify_api_...   →  .env.local
 ```
 
-`.env.local` already has both keys this needs: `GROQ_API_KEY` (enrichment) and
-`ANTHROPIC_API_KEY` (reading on-screen text).
+Enrichment defaults to a local LLM (`LLM_PROVIDER=local`). Optional free Groq
+models are allow-listed; set `LLM_PROVIDER=groq` and `GROQ_API_KEY` only if you
+want that path.
 
 ## 1. Extract
 
-Start the Instagram sidecar first (`ig-bridge/start-bridge.command`) and make
-sure `/connect` shows the account linked. Then:
-
 ```bash
-python3 pipeline/extract.py --stats          # see coverage before you start
-python3 pipeline/extract.py --limit 10       # try ten first
-python3 pipeline/extract.py                  # the whole queue
+pipeline/.venv/bin/python pipeline/extract.py --stats
+pipeline/.venv/bin/python pipeline/extract.py --limit 10          # dry run
+pipeline/.venv/bin/python pipeline/extract.py --limit 10 --run    # ~$0.03 of free credit
+pipeline/.venv/bin/python pipeline/extract.py --run               # the rest
 ```
 
 Or double-click `pipeline/start-extract.command`.
 
-**This is slow on purpose.** Every caption is one call to Instagram's private
-API, paced ~25s apart. 386 reels is roughly 2.5 hours for captions alone, plus
-transcription time. That pacing is the only thing standing between this backfill
-and a checkpointed account — please do not lower `IG_MEDIA_MIN_INTERVAL_SECONDS`
-to make it faster.
+Dry run (no `--run`) prints queue size, estimated credit, and free disk — it
+never starts an Apify actor. CDN media URLs expire within hours, so a real run
+downloads immediately, OCRs, transcribes, then deletes the mp4 unless
+`--keep-media` / `KEEP_MEDIA=1`.
 
-Ctrl-C is safe. Every item commits as it finishes, so re-running resumes rather
-than restarts. If Instagram pushes back, the script reports the cooldown and
-stops; run it again in a few hours.
+Ctrl-C is safe. Every item commits as it finishes. Credit stops cleanly at
+$4.50 of the free $5 monthly cycle so the account cannot tip into billing.
 
-Run it in a few sessions across a few days rather than one long burn.
+### Optional: sidecar
+
+`--fetcher sidecar` still exists for the private-API path. It prints a ban-risk
+warning and is never the default. If you use it, keep
+`IG_MEDIA_MIN_INTERVAL_SECONDS` (default 25) as a ban guard — not a perf knob.
 
 ## 2. Enrich
 
-With the app running (`npm run dev`):
-
 ```bash
-curl -X POST http://localhost:3210/api/enrich-pending   # 20 items per call
+open pipeline/start-llm.command   # mlx_lm.server on :8090 (first run ~2.3 GB)
+npm run dev                       # app on :3210
+scripts/enrich-all.sh             # loops POST /api/enrich-pending until 0
 ```
 
-Repeat until it returns `{"enriched":0}`. This is what fills in `entities` —
-the named films, job portals, AI models, universities, and scholarships that
-make `list_entities` useful.
+Or by hand: `curl -X POST http://localhost:3210/api/enrich-pending` until it
+returns `{"enriched":0}`. This fills `entities` — the named films, job portals,
+AI models, universities, and scholarships that make `list_entities` useful.
 
 ## 3. Connect it to Claude
 
@@ -113,24 +114,26 @@ but has no extracted text yet" — and the first answer, said confidently, is a
 lie about your own knowledge. Every search that finds nothing reports how much
 of the vault is still unread.
 
-## Environment variables added
+## Environment variables
 
 | Var | Default | Effect |
 |---|---|---|
-| `IG_MEDIA_MIN_INTERVAL_SECONDS` | `25` | Seconds between per-reel Instagram lookups |
-| `REEL_VAULT_WHISPER_MODEL` | `small` | `tiny`/`base`/`small`/`medium` — bigger is slower and better |
-| `REEL_VAULT_VISION_MODEL` | `claude-haiku-4-5-20251001` | Model that reads on-screen text |
-| `REEL_VAULT_FRAMES` | `4` | Frames sampled per reel for on-screen text |
+| `APIFY_TOKEN` | unset | Enables Apify Free fetcher (required for `--run`) |
+| `LLM_PROVIDER` | `local` | `local` or `groq` |
+| `LLM_BASE_URL` | `http://127.0.0.1:8090/v1` / Groq | OpenAI-compatible base |
+| `LLM_MODEL` | Qwen3-4B / gpt-oss-120b | Must be on the allow-list |
+| `GROQ_API_KEY` | unset | Required only when `LLM_PROVIDER=groq` |
+| `KEEP_MEDIA` | unset | Keep downloaded mp4s under `data/media/` |
+| `REEL_VAULT_WHISPER_MODEL` | `mlx-community/whisper-small-mlx` | Whisper weights |
+| `IG_MEDIA_MIN_INTERVAL_SECONDS` | `25` | Sidecar-only pacing (ban guard) |
 
 ## Honest limitations
 
-- **The account risk is real.** `instagrapi` uses Instagram's private API, which
-  violates their ToS. The pacing reduces the risk; it does not remove it.
+- **Apify Free is credit, not money — until a card is attached.** Use an account
+  with no payment method. Guardrails abort if the plan looks paid or credit
+  would pass $4.50 this cycle.
 - **Music-only reels yield nothing.** Transcripts under 15 characters are
   discarded rather than stored as hallucinated lyrics, so aesthetic reels stay
-  searchable only by caption and on-screen text.
-- **Deleted reels are gone.** Anything that 404s is marked `unavailable` and
-  never retried. The link stays in the vault; its content is unrecoverable.
-- **Entities are only as good as the extraction.** A reel that names three anime
-  in on-screen text only gets them if the frames were sampled where the text
-  was. `FRAME_COUNT` is the dial.
+  caption/OCR-only.
+- **Optional sidecar risk is real.** `instagrapi` uses Instagram's private API.
+  Prefer Apify for the default path.
