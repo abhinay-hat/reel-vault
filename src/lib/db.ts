@@ -140,6 +140,10 @@ function db(): DatabaseSync {
     "alter table items add column actions text not null default '[]'",
     "alter table items add column content_status text not null default 'pending'",
     "alter table items add column content_error text",
+    "alter table items add column keyframe_file text",
+    "alter table items add column duration_s real",
+    "alter table items add column music text",
+    "alter table items add column fetcher text",
   ]) {
     try {
       d.exec(col);
@@ -192,6 +196,14 @@ export interface Item {
   content_status: ContentStatus;
   /** Why the last extraction attempt failed, if it did. */
   content_error: string | null;
+  /** One JPEG under data/media — first content frame (t≈1.0 s). */
+  keyframe_file: string | null;
+  /** Clip length in seconds from Apify or ffprobe. */
+  duration_s: number | null;
+  /** JSON musicInfo: {"song","artist","original"}. */
+  music: string | null;
+  /** Which fetcher filled caption/video: apify | sidecar. */
+  fetcher: string | null;
 }
 
 /**
@@ -234,6 +246,7 @@ export type NewItem = Omit<
   | "id" | "created_at" | "poster" | "clip" | "media_file" | "video" | "video_file"
   | "caption" | "transcript" | "ocr_text" | "entities" | "actions"
   | "content_status" | "content_error"
+  | "keyframe_file" | "duration_s" | "music" | "fetcher"
 > & {
   created_at?: string;
   media_file?: string | null;
@@ -246,6 +259,10 @@ export type NewItem = Omit<
   actions?: string[];
   content_status?: ContentStatus;
   content_error?: string | null;
+  keyframe_file?: string | null;
+  duration_s?: number | null;
+  music?: string | null;
+  fetcher?: string | null;
 };
 
 interface ItemRow {
@@ -256,6 +273,8 @@ interface ItemRow {
   caption: string | null; transcript: string | null; ocr_text: string | null;
   entities: string; actions: string;
   content_status: string; content_error: string | null;
+  keyframe_file: string | null; duration_s: number | null;
+  music: string | null; fetcher: string | null;
 }
 
 function rowToItem(r: ItemRow): Item {
@@ -290,6 +309,10 @@ function rowToItem(r: ItemRow): Item {
     actions: safeArray(r.actions ?? "[]"),
     content_status: (r.content_status ?? "pending") as ContentStatus,
     content_error: r.content_error ?? null,
+    keyframe_file: r.keyframe_file ?? null,
+    duration_s: r.duration_s ?? null,
+    music: r.music ?? null,
+    fetcher: r.fetcher ?? null,
   };
 }
 
