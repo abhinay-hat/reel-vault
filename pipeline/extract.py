@@ -163,9 +163,39 @@ def main() -> None:
     print("Next: open pipeline/start-llm.command; npm run dev; scripts/enrich-all.sh")
 
 
+def _safe_process(
+    con: Any,
+    row: Any,
+    fetched: Any,
+    *,
+    keep_media: bool,
+    tessdata: Path,
+    caption_only_ok: bool = False,
+) -> None:
+    """Run process_item; one bad reel must not kill an unattended run."""
+    from reelvault.db import save
+    from reelvault.process import delete_video_file, process_item
+
+    try:
+        process_item(
+            con, row, fetched,
+            keep_media=keep_media,
+            tessdata_dir=tessdata,
+            caption_only_ok=caption_only_ok,
+        )
+    except KeyboardInterrupt:
+        raise
+    except Exception as e:  # noqa: BLE001
+        msg = f"process: {type(e).__name__}: {e}"[:300]
+        save(con, row["id"], content_status="failed", content_error=msg)
+        if not keep_media:
+            delete_video_file(row["id"])
+            save(con, row["id"], video_file=None)
+        print(f"  ! {row['id'][:8]} {msg}")
+
+
 def _run_sidecar(con: Any, rows: list, keep_media: bool, tessdata: Path) -> None:
     from reelvault.fetch_sidecar import fetch_caption, set_stop as sidecar_stop
-    from reelvault.process import process_item
 
     for row in rows:
         if _stop:
@@ -176,9 +206,13 @@ def _run_sidecar(con: Any, rows: list, keep_media: bool, tessdata: Path) -> None
             break
         if status != "fetched":
             continue
-        # Re-read row after fetch.
         fresh = con.execute("select * from items where id = ?", (row["id"],)).fetchone()
-        process_item(con, fresh, None, keep_media=keep_media, tessdata_dir=tessdata)
+        _safe_process(
+            con, fresh, None,
+            keep_media=keep_media,
+            tessdata=tessdata,
+            caption_only_ok=True,
+        )
         sidecar_stop(_stop)
 
 
@@ -190,6 +224,7 @@ def _run_apify(
     keep_media: bool,
     tessdata: Path,
 ) -> None:
+    from reelvault.db import MEDIA_DIR, DB_PATH
     from reelvault.fetch_apify import FetchError, fetch_batch, normalize_url
     from reelvault.guardrails import (
         GuardrailError,
@@ -198,7 +233,6 @@ def _run_apify(
         check_disk,
         fetch_apify_limits,
     )
-    from reelvault.process import process_item
 
     try:
         limits = fetch_apify_limits(token)
@@ -207,22 +241,18 @@ def _run_apify(
         print(f"guardrail: {e}")
         sys.exit(1)
 
-    # Split: already-fetched rows process first without a new Apify call.
-    pending = [r for r in rows if r["content_status"] != "fetched"]
+    # Re-fetch interrupted `fetched` rows with pending — CDN URLs expire and
+    # image posts have no stored image list without a fresh Apify result.
     already = [r for r in rows if r["content_status"] == "fetched"]
+    pending = [r for r in rows if r["content_status"] != "fetched"]
+    work = already + pending  # fetched first
 
-    for row in already:
-        if _stop:
-            return
-        print(f"→ (resume) {row['id'][:8]}")
-        process_item(con, row, None, keep_media=keep_media, tessdata_dir=tessdata)
+    totals = {"fetched": 0, "failed": 0, "unavailable": 0}
 
-    for i in range(0, len(pending), batch_size):
+    for i in range(0, len(work), batch_size):
         if _stop:
             break
-        batch = pending[i : i + batch_size]
-        from reelvault.db import MEDIA_DIR, DB_PATH
-
+        batch = work[i : i + batch_size]
         ok_disk, free = check_disk(MEDIA_DIR if MEDIA_DIR.exists() else DB_PATH.parent)
         if not ok_disk:
             print(f"disk low ({free / (1024**3):.1f} GB < 3 GB) — stopping")
@@ -234,7 +264,16 @@ def _run_apify(
                 print(reason)
                 break
             print(f"batch {i // batch_size + 1}: {len(batch)} urls")
-            results = fetch_batch(con, batch, token, dry_run=False, limits=limits)
+            results, counts = fetch_batch(
+                con, batch, token, dry_run=False, limits=limits,
+            )
+            for k in totals:
+                totals[k] += counts.get(k, 0)
+            print(
+                f"  fetch: fetched={counts.get('fetched', 0)} "
+                f"failed={counts.get('failed', 0)} "
+                f"unavailable={counts.get('unavailable', 0)}"
+            )
         except GuardrailError as e:
             print(f"guardrail: {e}")
             break
@@ -251,7 +290,17 @@ def _run_apify(
             norm = normalize_url(row["url"])
             fr = results.get(norm[1]) if norm else None
             print(f"  process {row['id'][:8]}")
-            process_item(con, fresh, fr, keep_media=keep_media, tessdata_dir=tessdata)
+            _safe_process(
+                con, fresh, fr,
+                keep_media=keep_media,
+                tessdata=tessdata,
+                caption_only_ok=False,
+            )
+
+    print(
+        f"run totals: fetched={totals['fetched']} "
+        f"failed={totals['failed']} unavailable={totals['unavailable']}"
+    )
 
 
 if __name__ == "__main__":
