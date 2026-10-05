@@ -9,7 +9,7 @@ from reelvault import ocr
 def test_merge_dedupe_and_cap():
     texts = [
         "Line A\nLine B",
-        "line a\nLine C",  # Line A dup (case/space)
+        "line a\nLine C",
         "X" * 3000,
     ]
     merged = ocr.merge_frame_texts(texts)
@@ -30,20 +30,39 @@ def test_secret_redaction(monkeypatch, tmp_path):
     assert "[redacted]" in out
 
 
-def test_indic_script_filter(monkeypatch, tmp_path):
-    # Simulate pytesseract returning mixed lines.
+def test_noise_line_rejected():
+    # Mixed-script garbage: few Indic letters among Latin → reject.
+    assert ocr._keep_indic_line("ToP3AITOOLS 0౧౩౧4!") is False
+    assert ocr._keep_indic_line("hello") is False
+
+
+def test_real_hindi_line_kept(monkeypatch, tmp_path):
     class FakeImg:
-        pass
+        width = 800
+        height = 600
 
-    def fake_image_to_string(img, lang=None, config=None):
-        return "English only\nनमस्ते दुनिया\nతెలుగు లైన్\nplain"
+        def resize(self, *a, **k):
+            return self
 
-    monkeypatch.setitem(__import__("sys").modules, "pytesseract", type("P", (), {
-        "image_to_string": staticmethod(fake_image_to_string),
-    })())
+    def fake_image_to_data(img, lang=None, config=None, output_type=None):
+        # One Hindi line with high confidence.
+        return {
+            "text": ["नमस्ते", "दुनिया", "hi"],
+            "conf": ["90", "88", "95"],
+            "block_num": [1, 1, 1],
+            "par_num": [1, 1, 1],
+            "line_num": [1, 1, 2],
+        }
+
+    class FakePyt:
+        class Output:
+            DICT = "dict"
+
+        image_to_data = staticmethod(fake_image_to_data)
+
+    monkeypatch.setitem(__import__("sys").modules, "pytesseract", FakePyt())
     monkeypatch.setattr("PIL.Image.open", lambda *_a, **_k: FakeImg())
 
     out = ocr.tesseract_indic(tmp_path / "x.jpg", tmp_path)
     assert "नमस्ते" in out
-    assert "తెలుగు" in out
-    assert "English" not in out
+    assert "hi" not in out  # Latin-only line dropped
