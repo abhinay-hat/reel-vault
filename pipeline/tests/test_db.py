@@ -106,3 +106,12 @@ def test_save_and_stats(tmp_path):
     assert s["by_status"].get("fetched") == 1
     assert s["coverage"]["caption"] == 1
     assert s["free_disk_bytes"] > 0
+    assert s["no_text"] == 0
+
+
+def test_stats_no_text_extracted(tmp_path):
+    con = _fresh(tmp_path)
+    _insert(con, id="m", url="https://instagram.com/reel/M/")
+    db.save(con, "m", content_status="transcribed", caption=None, transcript=None, ocr_text=None)
+    s = db.stats(con)
+    assert s["no_text"] == 1
