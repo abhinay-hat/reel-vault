@@ -1,0 +1,4 @@
+instagrapi==2.8.1
+fastapi>=0.115
+uvicorn>=0.30
+markitdown>=0.1.0
