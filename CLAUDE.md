@@ -44,13 +44,11 @@ The single source of truth. Local SQLite via Node's built-in `node:sqlite` (need
 
 The `Connector` interface (`src/lib/connectors/types.ts`) is the seam for adding new import sources.
 
-### Content extraction — `pipeline/extract.py`
+### Content extraction — `pipeline/extract.py` + `pipeline/reelvault/`
 
 A DM-shared reel arrives as a bare URL: Instagram's share payload has no caption, so those items land titled `Shared by <user id>` with nothing inside. Until this pipeline runs, the vault holds pointers, not knowledge.
 
-It fills three columns, one per place a reel keeps its meaning: `caption` (re-fetched from the sidecar's `GET /media/{shortcode}`), `transcript` (faster-whisper, locally), and `ocr_text` (keyframes via ffmpeg, read by a vision model rather than tesseract — reel text is stylised and overlaid, which is close to worst-case for classical OCR). `content_status` tracks pipeline position so runs are resumable; `unavailable` items are never retried.
-
-**Pacing is a safety mechanism, not a performance setting.** Each caption is one private-API call; `IG_MEDIA_MIN_INTERVAL_SECONDS` (default 25) plus the sidecar's cooldown is what keeps a 386-reel backfill from looking like a scraper. See `docs/KNOWLEDGE-BASE.md`.
+Default path (₹0): Apify Free actor `apify~instagram-scraper` fetches caption + media URL; then local ffmpeg keyframes, Apple Vision + Tesseract (hin/tel), and mlx-whisper fill `transcript` / `ocr_text`. `content_status` tracks pipeline position (`pending` → `fetched` → `transcribed` → `enriched`). Sidecar fetch is opt-in only (`--fetcher sidecar`). See `docs/KNOWLEDGE-BASE.md`. One-time install: `./pipeline/setup.sh`.
 
 ### AI enrichment — `src/lib/ai.ts` + `src/app/api/enrich*`
 
@@ -58,7 +56,7 @@ Items are saved with `summary: null` and enriched later. `ai.ts` holds the pure 
 
 `/api/enrich-pending` pulls up to 20 items via `listItemsNeedingEnrichment` and reads only locally-extracted text. It deliberately does **not** call `convertToMarkdown(url)` — for a reel that fetches an Instagram HTML shell with no caption in it, which is why the old version summarised nothing for all 386 DM-shared reels.
 
-The LLM seam is `src/lib/llm.ts`, which calls **Groq** (`GROQ_API_KEY`, `llama-3.3-70b-versatile`) — not the Anthropic SDK, despite `@anthropic-ai/sdk` still being in `package.json`. `ANTHROPIC_API_KEY` is used only by the vision step in `pipeline/extract.py`. A missing key is a no-op, not an error.
+The LLM seam is `src/lib/llm.ts`: default `LLM_PROVIDER=local` → OpenAI-compatible `mlx_lm.server` (`pipeline/start-llm.command`, Qwen3-4B). Optional `groq` uses allow-listed free models only. Batch helper: `scripts/enrich-all.sh`.
 
 ### MCP server — `mcp/reel-vault-mcp.mjs`
 
@@ -82,12 +80,15 @@ Server Components fetch directly from `db.ts`; mutations go through Server Actio
 |-----|--------|
 | `APP_PASSCODE` | Enables the passcode gate (unset = open app) |
 | `SHARE_TOKEN` | Enables `/api/share` (unset = 503) |
-| `GROQ_API_KEY` | Enables AI enrichment and `/api/chat` (unset = no-op) |
-| `ANTHROPIC_API_KEY` | Enables reading on-screen text in `pipeline/extract.py` |
-| `IG_MEDIA_MIN_INTERVAL_SECONDS` | Seconds between per-reel lookups (default 25) — a ban guard, not a perf knob |
-| `REEL_VAULT_WHISPER_MODEL` | Whisper size for transcription (default `small`) |
-| `REEL_VAULT_VISION_MODEL` | Model that reads on-screen text |
-| `REEL_VAULT_FRAMES` | Frames sampled per reel (default 4) |
+| `APIFY_TOKEN` | Enables Apify Free fetcher for `pipeline/extract.py --run` |
+| `LLM_PROVIDER` | `local` (default) or `groq` |
+| `LLM_BASE_URL` | OpenAI-compatible base (default local `:8090/v1` or Groq) |
+| `LLM_MODEL` | Must be on the allow-list in `src/lib/llm.ts` / guardrails |
+| `GROQ_API_KEY` | Required only when `LLM_PROVIDER=groq` |
+| `KEEP_MEDIA` | Keep downloaded mp4s under `data/media/` |
+| `REEL_VAULT_WHISPER_MODEL` | Whisper weights (default `mlx-community/whisper-small-mlx`) |
 | `REEL_VAULT_DB` | SQLite file path override |
+| `REEL_VAULT_MEDIA` | Media directory override |
 | `IG_BRIDGE_URL` | Sidecar base URL (default `http://127.0.0.1:8765`) |
+| `IG_MEDIA_MIN_INTERVAL_SECONDS` | Sidecar-only pacing (default 25) — ban guard |
 | `IG_SESSION_FILE`, `IG_MIN_GATHER_INTERVAL_HOURS`, `IG_COOLDOWN_HOURS` | Sidecar-side (Python) config |
