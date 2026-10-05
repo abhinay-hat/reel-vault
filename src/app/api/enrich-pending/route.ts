@@ -17,7 +17,7 @@ export const maxDuration = 300;
 export async function POST() {
   if (!llmEnabled()) {
     return NextResponse.json(
-      { enriched: 0, reason: "no GROQ_API_KEY configured" },
+      { enriched: 0, reason: "LLM not configured (start local server or set GROQ_API_KEY)" },
       { status: 200 },
     );
   }
@@ -46,14 +46,20 @@ export async function POST() {
         failed.push(it.id);
         continue;
       }
-      await updateItem(it.id, {
+      const patch: Parameters<typeof updateItem>[1] = {
         summary: k.summary,
         category: k.category || it.category,
         tags: k.tags.length ? k.tags : it.tags,
         entities: k.entities,
         actions: k.actions,
         content_status: "enriched",
-      });
+      };
+      // Placeholder DM titles become the summary's first sentence once we know it.
+      if (it.title.startsWith("Shared by ") && k.summary) {
+        const sentence = k.summary.split(/(?<=[.!?])\s+/)[0] || k.summary;
+        patch.title = sentence.slice(0, 90);
+      }
+      await updateItem(it.id, patch);
       enriched++;
     } catch (err) {
       console.error("[/api/enrich-pending] LLM error:", err);
