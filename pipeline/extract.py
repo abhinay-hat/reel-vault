@@ -18,6 +18,8 @@ import math
 import os
 import signal
 import sys
+
+import requests
 from pathlib import Path
 from typing import Any, Optional
 
@@ -290,6 +292,10 @@ def _run_apify(
         except FetchError as e:
             print(f"fetch error: {e}")
             break
+        except requests.RequestException as e:
+            # Apify outage after retries: rows stay pending/fetched for the next run.
+            print(f"apify request failed, skipping batch: {type(e).__name__}: {str(e)[:150]}")
+            continue
 
         for row in batch:
             if _stop:

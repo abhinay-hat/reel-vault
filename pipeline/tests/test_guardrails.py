@@ -87,3 +87,22 @@ def test_backoff_fake_clock():
     out = g.with_backoff(flaky, max_tries=3, sleep=sleeps.append)
     assert out == "ok"
     assert sleeps == [12.0, 12.0]
+
+
+def test_backoff_retries_transient_5xx_then_succeeds():
+    import requests
+    from reelvault.guardrails import with_backoff
+
+    calls = {"n": 0}
+
+    def fn():
+        calls["n"] += 1
+        if calls["n"] == 1:
+            r = requests.Response()
+            r.status_code = 502
+            raise requests.HTTPError(response=r)
+        return "ok"
+
+    waits = []
+    assert with_backoff(fn, sleep=waits.append) == "ok"
+    assert waits == [30.0]
