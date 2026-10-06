@@ -125,6 +125,9 @@ def with_backoff(
         except requests.HTTPError as e:
             last = e
             resp = e.response
+            if resp is not None and resp.status_code >= 500 and attempt + 1 < max_tries:
+                sleep(30.0)  # transient Apify 502/503; a dead run cost the whole pass
+                continue
             if resp is None or resp.status_code != 429:
                 raise
             if attempt + 1 >= max_tries:
@@ -137,6 +140,8 @@ def with_backoff(
                 except ValueError:
                     wait = 60.0
             sleep(wait)
-        except requests.RequestException:
-            raise
+        except (requests.ConnectionError, requests.Timeout):
+            if attempt + 1 >= max_tries:
+                raise
+            sleep(30.0)
     raise RateLimited("rate limited after 3 tries") from last
