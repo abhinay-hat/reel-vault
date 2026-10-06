@@ -14,7 +14,9 @@ _OCR_LOCK = threading.Lock()
 _SECRET_RE = re.compile(
     r"\b(?:sk|pk|ghp|xox[a-z]|AKIA|AIza)[-_A-Za-z0-9]{12,}\b|"
     r"\b[A-Fa-f0-9]{32,}\b|"
-    r"\b[A-Za-z0-9+/_-]{40,}\b"
+    # No "/" and not inside a URL path: long repo paths were being redacted
+    # ("raw.githubusercontent.[redacted].md"), which wrecked saved links.
+    r"(?<![/.\w])[A-Za-z0-9+_-]{40,}\b"
 )
 
 _DEVANAGARI = re.compile(r"[\u0900-\u097F]")

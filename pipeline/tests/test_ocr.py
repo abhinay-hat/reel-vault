@@ -85,3 +85,10 @@ def test_check_vision_raises_only_when_canary_fails(monkeypatch):
     ocr.check_vision(["", "text"])  # some text: Vision is up
     monkeypatch.setattr(ocr, "frame_ocr", lambda _p: "REEL VAULT")
     ocr.check_vision(["", ""])  # text-less reel, Vision healthy
+
+
+def test_urls_survive_redaction():
+    url = "https://raw.githubusercontent.com/Panniantong/Agent-Reach/main/docs/README_en.md"
+    assert ocr._SECRET_RE.sub("[redacted]", url) == url
+    long_tok = "A" * 20 + "b9" * 15
+    assert ocr._SECRET_RE.sub("[redacted]", f"key {long_tok} end") == "key [redacted] end"
