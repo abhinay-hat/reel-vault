@@ -51,6 +51,8 @@ function db(): DatabaseSync {
   mkdirSync(path.dirname(DB_PATH), { recursive: true });
   const { DatabaseSync: DB } = loadSqlite();
   const d = new DB(DB_PATH);
+  // pipeline/extract.py writes the same file; wait instead of SQLITE_BUSY.
+  d.exec("pragma busy_timeout = 30000");
   d.exec(`
     create table if not exists items (
       id text primary key,
