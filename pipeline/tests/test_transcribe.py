@@ -60,3 +60,28 @@ def test_lang_prefix(tmp_path, monkeypatch):
     tr._backend = None
     out = tr.transcribe(tmp_path / "v.mp4")
     assert out.startswith("[ja] ")
+
+
+def test_all_segments_filtered_means_no_transcript(tmp_path, monkeypatch):
+    # Music-only reel: Whisper invents lyrics; the filter drops them, and the
+    # raw text must not sneak back in.
+    fake = types.ModuleType("mlx_whisper")
+    fake.transcribe = lambda *a, **k: {
+        "text": "Thank you for watching, see you next time",
+        "language": "en",
+        "segments": [{"text": "Thank you for watching, see you next time",
+                      "no_speech_prob": 0.9, "avg_logprob": -1.5}],
+    }
+    monkeypatch.setitem(sys.modules, "mlx_whisper", fake)
+    tr._model = None
+    tr._backend = None
+    assert tr.transcribe(tmp_path / "v.mp4") == ""
+
+
+def test_faster_whisper_vad_empty_index_error(tmp_path, monkeypatch):
+    class M:
+        def transcribe(self, *a, **k):
+            raise IndexError("tuple index out of range")
+
+    monkeypatch.setattr(tr, "_load", lambda: ("faster", M()))
+    assert tr.transcribe(tmp_path / "v.mp4") == ""
