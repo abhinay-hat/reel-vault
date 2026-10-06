@@ -44,13 +44,24 @@ while true; do
     sleep 2
     continue
   fi
+  # node, not python3: the app needs node anyway, and on Windows Git Bash
+  # python3 is a Store stub. A parse failure must not read as remaining=0.
+  if ! parsed="$(echo "$body" | node -e '
+const d = JSON.parse(require("fs").readFileSync(0, "utf8"));
+console.log(d.enriched ?? 0, d.failed ?? 0, d.remaining ?? 0);
+' 2>/dev/null)"; then
+    fails=$((fails + 1))
+    echo "unparseable response (fail $fails/3): ${body:0:200}"
+    if [ "$fails" -ge 3 ]; then
+      echo "Stopping after 3 consecutive failures."
+      exit 1
+    fi
+    sleep 2
+    continue
+  fi
   fails=0
   calls=$((calls + 1))
-  read -r enriched failed remaining <<<"$(echo "$body" | python3 -c '
-import sys, json
-d=json.load(sys.stdin)
-print(d.get("enriched",0), d.get("failed",0), d.get("remaining",0))
-' 2>/dev/null || echo "0 0 0")"
+  read -r enriched failed remaining <<<"$parsed"
   total_enriched=$((total_enriched + enriched))
   total_failed=$((total_failed + failed))
   echo "enriched=$enriched failed=$failed remaining=$remaining  (running enriched $total_enriched)"
