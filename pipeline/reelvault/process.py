@@ -21,7 +21,7 @@ from reelvault.media import (
     pick_later_times,
     probe,
 )
-from reelvault.ocr import apple_vision_ocr, merge_frame_texts, tesseract_indic
+from reelvault.ocr import frame_ocr, check_vision, merge_frame_texts, tesseract_indic
 from reelvault.transcribe import transcribe as whisper_transcribe
 
 
@@ -167,9 +167,10 @@ def _process_video(
         hashes: list[int] = []
         t_vis = time.time()
         for _t, path in frames:
-            vision_texts.append(apple_vision_ocr(path))
+            vision_texts.append(frame_ocr(path))
             hashes.append(dhash_bits(path))
         timings["vision"] = time.time() - t_vis
+        check_vision(vision_texts)
 
         uniq_idx, _rep = dedupe_frames(hashes, vision_texts) if hashes else ([], [])
         merged_parts: list[str] = []
@@ -256,9 +257,10 @@ def _process_images(
         hashes: list[int] = []
         t_vis = time.time()
         for p in paths:
-            vision_texts.append(apple_vision_ocr(p))
+            vision_texts.append(frame_ocr(p))
             hashes.append(dhash_bits(p))
         timings["vision"] = time.time() - t_vis
+        check_vision(vision_texts)
 
         uniq_idx, _ = dedupe_frames(hashes, vision_texts) if hashes else ([], [])
         merged_parts: list[str] = []

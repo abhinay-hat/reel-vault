@@ -25,13 +25,25 @@ def _load() -> tuple[str, Any]:
         return _backend, _model
     except Exception:
         pass
+    if os.name == "nt":
+        # pip nvidia-cublas/cudnn wheels ship DLLs under site-packages/nvidia/*/bin.
+        import site
+
+        for sp in site.getsitepackages():
+            for bin_dir in Path(sp, "nvidia").glob("*/bin"):
+                os.add_dll_directory(str(bin_dir))
+                os.environ["PATH"] = f"{bin_dir}{os.pathsep}{os.environ['PATH']}"
     from faster_whisper import WhisperModel
 
     size = WHISPER_MODEL
-    if "/" in size:
+    if "/" in size and "mlx" in size:
         size = "small"
     _backend = "faster"
-    _model = WhisperModel(size, device="cpu", compute_type="int8")
+    # CUDA when present (e.g. RTX box: REEL_VAULT_WHISPER_MODEL=large-v3-turbo), else CPU int8.
+    try:
+        _model = WhisperModel(size, device="cuda", compute_type="float16")
+    except Exception:
+        _model = WhisperModel(size, device="cpu", compute_type="int8")
     return _backend, _model
 
 

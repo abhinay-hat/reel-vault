@@ -19,7 +19,7 @@ from reelvault.media import (  # noqa: E402
     pick_later_times,
     probe,
 )
-from reelvault.ocr import apple_vision_ocr, merge_frame_texts, tesseract_indic  # noqa: E402
+from reelvault.ocr import frame_ocr, merge_frame_texts, tesseract_indic  # noqa: E402
 from reelvault.transcribe import transcribe  # noqa: E402
 
 
@@ -44,7 +44,7 @@ def main() -> int:
         hashes: list[int] = []
         for _t, path in frames:
             s = time.time()
-            vision_texts.append(apple_vision_ocr(path))
+            vision_texts.append(frame_ocr(path))
             vision_secs.append(time.time() - s)
             hashes.append(dhash_bits(path))
         t_vision = time.time()
