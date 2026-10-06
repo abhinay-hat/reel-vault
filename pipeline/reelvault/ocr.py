@@ -106,6 +106,14 @@ def check_vision(vision_texts: list[str]) -> None:
         raise VisionUnavailable("OCR engine returned no text for a known test image")
 
 
+def _tess_config(tessdata_dir: Path) -> str:
+    # pytesseract splits config with shlex(posix=False) on Windows, which keeps
+    # quotes literally and breaks the path; pass it unquoted there.
+    if sys.platform == "win32":
+        return f"--tessdata-dir {Path(tessdata_dir).as_posix()}"
+    return f'--tessdata-dir "{tessdata_dir}"'
+
+
 def _indic_letter_stats(text: str) -> tuple[int, int]:
     """Return (indic_letters, total_letters)."""
     indic = 0
@@ -148,7 +156,7 @@ def tesseract_indic(path: Path, tessdata_dir: Path) -> str:
         data = pytesseract.image_to_data(
             img,
             lang="hin+tel",
-            config=f'--tessdata-dir "{tessdata_dir}"',
+            config=_tess_config(tessdata_dir),
             output_type=pytesseract.Output.DICT,
         )
     except Exception:
@@ -196,7 +204,7 @@ def _tesseract_all(path: Path, tessdata_dir: Path) -> str:
         raw = pytesseract.image_to_string(
             img,
             lang="eng+hin+tel",
-            config=f'--tessdata-dir "{tessdata_dir}"',
+            config=_tess_config(tessdata_dir),
         )
     except Exception:
         return ""
