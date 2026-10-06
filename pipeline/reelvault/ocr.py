@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import re
+import sys
 import threading
 from pathlib import Path
 
@@ -21,11 +22,34 @@ _TELUGU = re.compile(r"[\u0C00-\u0C7F]")
 _LETTER = re.compile(r"[^\W\d_]", re.UNICODE)
 
 
-def apple_vision_ocr(path: Path) -> str:
+def _rapid_ocr(path: Path) -> str:
+    """Non-Mac stand-in for Vision: RapidOCR (ONNX), same line/redact/cap contract."""
+    global _RAPID
+    try:
+        if _RAPID is None:
+            from rapidocr_onnxruntime import RapidOCR
+
+            _RAPID = RapidOCR()
+        result, _ = _RAPID(str(path))
+    except Exception:
+        return ""
+    # result: [[box, text, score], ...]; box[0] is the top-left corner.
+    rows = sorted(result or [], key=lambda r: (r[0][0][1], r[0][0][0]))
+    lines = [re.sub(r"\s+", " ", t).strip() for _b, t, sc in rows if float(sc) >= 0.5]
+    txt = _SECRET_RE.sub("[redacted]", "\n".join(l for l in lines if l))
+    return txt[:1000]
+
+
+_RAPID = None
+
+
+def frame_ocr(path: Path) -> str:
     """Apple Vision: one line per observation, top→bottom, cap 1000 chars.
 
     # Ported from reel-watcher (MIT, © 2026 Jacob Bruce): src/reel_watcher/study.py
     """
+    if sys.platform != "darwin":
+        return _rapid_ocr(path)
     try:
         import Vision
         from Foundation import NSURL, NSDictionary
@@ -54,6 +78,34 @@ def apple_vision_ocr(path: Path) -> str:
     return txt[:1000]
 
 
+class VisionUnavailable(RuntimeError):
+    """Vision silently returns nothing under heavy swap; saving would lose OCR."""
+
+
+def _vision_canary() -> bool:
+    import tempfile
+    from PIL import Image, ImageDraw, ImageFont
+
+    with tempfile.TemporaryDirectory() as td:
+        p = Path(td) / "canary.png"
+        im = Image.new("RGB", (720, 400), "white")
+        try:
+            font = ImageFont.truetype(
+                "arialbd.ttf" if sys.platform == "win32" else "/System/Library/Fonts/Supplemental/Arial Bold.ttf", 72
+            )
+        except OSError:
+            font = ImageFont.load_default(size=72)
+        ImageDraw.Draw(im).text((40, 150), "REEL VAULT", fill="black", font=font)
+        im.save(p)
+        return "VAULT" in frame_ocr(p).upper()
+
+
+def check_vision(vision_texts: list[str]) -> None:
+    """All frames empty is normal for text-less reels; only raise if Vision itself is down."""
+    if vision_texts and not any(vision_texts) and not _vision_canary():
+        raise VisionUnavailable("OCR engine returned no text for a known test image")
+
+
 def _indic_letter_stats(text: str) -> tuple[int, int]:
     """Return (indic_letters, total_letters)."""
     indic = 0
@@ -70,6 +122,14 @@ def _indic_letter_stats(text: str) -> tuple[int, int]:
 def _keep_indic_line(text: str) -> bool:
     indic, total = _indic_letter_stats(text)
     if indic < 3 or total == 0:
+        return False
+    # Real lines are one script; hin+tel garbage mixes both ("(शा, ౧౦ भाव").
+    if _DEVANAGARI.search(text) and _TELUGU.search(text):
+        return False
+    # Need 2+ distinct words of 2+ letters; drops "అ అ అ -" style repeats.
+    # Whitespace tokens: \w skips Indic vowel signs, so regex words split mid-word.
+    words = {w for w in text.split() if len(w) >= 2 and (_DEVANAGARI.search(w) or _TELUGU.search(w))}
+    if len(words) < 2:
         return False
     return (indic / total) >= 0.60
 
@@ -155,7 +215,7 @@ def read_frame(path: Path, tessdata_dir: Path) -> str:
     Prefer process.py's Vision→dedupe→Indic path for videos; this helper
     remains for simple call sites and tests.
     """
-    vision = apple_vision_ocr(path)
+    vision = frame_ocr(path)
     if vision:
         indic = tesseract_indic(path, tessdata_dir)
         parts = [vision]

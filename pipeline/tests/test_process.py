@@ -95,7 +95,7 @@ def _stub_video_pipeline(monkeypatch, media: Path, *, vision_raise=False):
         calls["tess"] += 1
         return ""
 
-    monkeypatch.setattr("reelvault.process.apple_vision_ocr", vision)
+    monkeypatch.setattr("reelvault.process.frame_ocr", vision)
     monkeypatch.setattr("reelvault.process.tesseract_indic", tess)
     monkeypatch.setattr(
         "reelvault.process.whisper_transcribe",
@@ -138,7 +138,7 @@ def test_image_item(tmp_path, monkeypatch):
         return dest
 
     monkeypatch.setattr("reelvault.process.download", fake_download)
-    monkeypatch.setattr("reelvault.process.apple_vision_ocr", lambda *_a: "SLIDE TEXT")
+    monkeypatch.setattr("reelvault.process.frame_ocr", lambda *_a: "SLIDE TEXT")
     monkeypatch.setattr("reelvault.process.tesseract_indic", lambda *_a, **_k: "")
     monkeypatch.setattr("reelvault.process.dhash_bits", lambda *_a, **_k: 1)
 
@@ -206,7 +206,7 @@ def test_media_file_only_if_empty(tmp_path, monkeypatch):
         return dest
 
     monkeypatch.setattr("reelvault.process.download", fake_download)
-    monkeypatch.setattr("reelvault.process.apple_vision_ocr", lambda *_a: "x")
+    monkeypatch.setattr("reelvault.process.frame_ocr", lambda *_a: "x")
     monkeypatch.setattr("reelvault.process.tesseract_indic", lambda *_a, **_k: "")
     monkeypatch.setattr("reelvault.process.dhash_bits", lambda *_a, **_k: 1)
 
@@ -249,7 +249,7 @@ def test_safe_process_continues_after_exception(tmp_path, monkeypatch):
     md5 = hashlib.md5(b"bad-1").hexdigest()
     assert not (media / f"{md5}.mp4").exists()
 
-    monkeypatch.setattr("reelvault.process.apple_vision_ocr", lambda *_a: "OK TEXT")
+    monkeypatch.setattr("reelvault.process.frame_ocr", lambda *_a: "OK TEXT")
     extract_mod._safe_process(
         con, b, FetchResult(video_url="https://cdn.example/v2.mp4"),
         keep_media=False, tessdata=tmp_path,

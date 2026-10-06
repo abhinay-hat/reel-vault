@@ -174,6 +174,7 @@ def _safe_process(
 ) -> None:
     """Run process_item; one bad reel must not kill an unattended run."""
     from reelvault.db import save
+    from reelvault.ocr import VisionUnavailable
     from reelvault.process import delete_video_file, process_item
 
     try:
@@ -185,6 +186,15 @@ def _safe_process(
         )
     except KeyboardInterrupt:
         raise
+    except VisionUnavailable as e:
+        # Leave the row 'fetched' so the next run re-fetches it; stop before
+        # more items get saved with OCR silently missing.
+        global _stop
+        _stop = True
+        if not keep_media:
+            delete_video_file(row["id"])
+            save(con, row["id"], video_file=None)
+        print(f"  ! {row['id'][:8]} {e} — stopping run (memory pressure? close apps, rerun)")
     except Exception as e:  # noqa: BLE001
         msg = f"process: {type(e).__name__}: {e}"[:300]
         save(con, row["id"], content_status="failed", content_error=msg)

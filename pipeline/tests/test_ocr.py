@@ -23,7 +23,7 @@ def test_secret_redaction(monkeypatch, tmp_path):
     def fake_vision(path: Path) -> str:
         return "token sk-abcdefghijklmnopqrstuvwxyz012345 and done"
 
-    monkeypatch.setattr(ocr, "apple_vision_ocr", fake_vision)
+    monkeypatch.setattr(ocr, "frame_ocr", fake_vision)
     monkeypatch.setattr(ocr, "tesseract_indic", lambda *_a, **_k: "")
     out = ocr.read_frame(tmp_path / "x.jpg", tmp_path)
     assert "sk-abcdefghijklmnopqrstuvwxyz012345" not in out
@@ -66,3 +66,22 @@ def test_real_hindi_line_kept(monkeypatch, tmp_path):
     out = ocr.tesseract_indic(tmp_path / "x.jpg", tmp_path)
     assert "नमस्ते" in out
     assert "hi" not in out  # Latin-only line dropped
+
+
+def test_mixed_script_and_repeat_noise_rejected():
+    # Real Tesseract hin+tel garbage seen on English reels (2026-10-06 run).
+    assert ocr._keep_indic_line("(शा, ౧౦ भाव") is False
+    assert ocr._keep_indic_line("అ అ అ -") is False
+    assert ocr._keep_indic_line("क्योंकि इंडिया में") is True
+    assert ocr._keep_indic_line("నేను తెలుగు మాట్లాడతాను") is True
+
+
+def test_check_vision_raises_only_when_canary_fails(monkeypatch):
+    import pytest
+    monkeypatch.setattr(ocr, "frame_ocr", lambda _p: "")
+    with pytest.raises(ocr.VisionUnavailable):
+        ocr.check_vision(["", ""])
+    ocr.check_vision([])  # no frames: nothing to judge
+    ocr.check_vision(["", "text"])  # some text: Vision is up
+    monkeypatch.setattr(ocr, "frame_ocr", lambda _p: "REEL VAULT")
+    ocr.check_vision(["", ""])  # text-less reel, Vision healthy

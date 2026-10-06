@@ -2,7 +2,8 @@
 // Allow-list mirrors pipeline/reelvault/guardrails.py — anything else throws.
 
 const ALLOWED: Record<string, string[]> = {
-  local: ["mlx-community/Qwen3-4B-Instruct-2507-4bit"],
+  // Ollama tag: RTX 5090 box (same Qwen3-2507 instruct family, 30B MoE).
+  local: ["mlx-community/Qwen3-4B-Instruct-2507-4bit", "qwen3:30b-a3b-instruct-2507-q4_K_M"],
   groq: ["openai/gpt-oss-120b", "openai/gpt-oss-20b"],
 };
 
