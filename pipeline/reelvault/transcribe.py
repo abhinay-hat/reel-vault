@@ -105,19 +105,26 @@ def transcribe(video: Path) -> str:
             path_or_hf_repo=repo,
             condition_on_previous_text=False,
         )
-        segs = filter_segments(list(r.get("segments") or []))
+        raw_segs = list(r.get("segments") or [])
+        segs = filter_segments(raw_segs)
         if segs:
             text = " ".join(s["text"] for s in segs).strip()
+        elif raw_segs:
+            text = ""  # every segment was filtered as no-speech/hallucination
         else:
             text = (r.get("text") or "").strip()
         lang = (r.get("language") or "").strip()
         return _finalize(text, lang)
 
-    segments, info = model.transcribe(
-        str(video),
-        condition_on_previous_text=False,
-        vad_filter=True,
-    )
+    try:
+        segments, info = model.transcribe(
+            str(video),
+            condition_on_previous_text=False,
+            vad_filter=True,
+        )
+        segments = list(segments)
+    except IndexError:
+        return ""  # VAD removed all audio (music-only reel); faster-whisper indexes an empty list
     raw = []
     for s in segments:
         raw.append({
