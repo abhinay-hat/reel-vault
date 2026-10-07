@@ -10,18 +10,39 @@ import { useState } from "react";
  * signed link may already be dead), so this reports both instead of leaving a
  * black rectangle: silence is what made it look like playback was broken.
  */
+export function InstagramEmbed({ src, title }: { src: string; title: string }) {
+  // Instagram's own player: no signed link to expire, nothing stored locally.
+  return (
+    <iframe
+      src={src}
+      title={title}
+      className="h-full w-full border-0 bg-paper"
+      loading="lazy"
+      allow="autoplay; encrypted-media; picture-in-picture"
+      allowFullScreen
+    />
+  );
+}
+
 export default function ClipPlayer({
   src,
   poster,
   held,
+  embed,
 }: {
   src: string;
   poster: string | null;
   /** True when the bytes are already on this machine. */
   held: boolean;
+  /** Instagram embed URL to fall back to when the file will not play. */
+  embed?: string | null;
 }) {
   const [failed, setFailed] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  if (failed && embed) {
+    return <InstagramEmbed src={embed} title="Instagram reel" />;
+  }
 
   if (failed) {
     return (
