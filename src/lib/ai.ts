@@ -260,3 +260,83 @@ export function parseChatResponse(raw: string): ChatResult {
     return empty;
   }
 }
+
+// ---------------------------------------------------------------- RAG chat
+
+/** Ask for search terms so "chatbot" also finds reels that say "AI assistant". */
+export function buildQueryExpansionPrompt(query: string): string {
+  return `A user is searching their personal vault of saved Instagram reels (tech tools, AI, anime, design, jobs, study abroad).
+Their question: "${query}"
+
+List 4-8 short search terms that would appear in the transcript, caption, on-screen text or summary of a matching reel: the key words of the question, synonyms, spelling variants, and closely related product or tool names. Single words or two-word phrases.
+
+Respond with ONLY a JSON object: {"terms": ["...", "..."]}`;
+}
+
+/** Expansion terms plus the question's own words; never empty for a non-empty query. */
+export function parseQueryTerms(raw: string, query: string): string[] {
+  const own = query
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((w) => w.length > 2 && !STOPWORDS.has(w));
+  let terms: string[] = [];
+  const body = (raw.match(/```(?:json)?\s*([\s\S]*?)```/)?.[1] ?? raw).trim();
+  const start = body.indexOf("{");
+  try {
+    const obj = JSON.parse(start >= 0 ? body.slice(start, body.lastIndexOf("}") + 1) : body);
+    if (Array.isArray(obj.terms)) terms = obj.terms.filter((t: unknown): t is string => typeof t === "string");
+  } catch {
+    // The question's own words still search fine without expansion.
+  }
+  return [...new Set([...terms.map((t) => t.trim().toLowerCase()), ...own])].filter(Boolean);
+}
+
+const STOPWORDS = new Set([
+  "the", "and", "for", "with", "that", "this", "what", "which", "where", "how", "who", "are", "was",
+  "were", "any", "all", "about", "from", "show", "find", "list", "give", "tell", "reel", "reels",
+  "video", "videos", "saved", "have", "has", "did", "does", "can", "you", "me", "my", "some",
+]);
+
+export interface RagSource {
+  n: number;
+  title: string;
+  category: string;
+  date: string;
+  summary: string | null;
+  /** The reel's own words around the match. */
+  evidence: string;
+}
+
+export function buildRagPrompt(query: string, sources: RagSource[]): string {
+  const list = sources
+    .map(
+      (s) => `[${s.n}] ${s.title}
+category: ${s.category} | saved: ${s.date}
+summary: ${s.summary?.trim() || "(not summarised yet)"}
+in the reel: ${s.evidence.replace(/[«»]/g, "") || "(no transcript or on-screen text)"}`,
+    )
+    .join("\n\n");
+  return `You answer questions about the user's own vault of saved Instagram reels. Use ONLY the reels below; never invent tools, links or claims that are not in them.
+
+Question: "${query}"
+
+Reels found:
+${list}
+
+Write the answer in plain markdown:
+1. Start with 1-2 sentences that directly answer the question.
+2. Then one bullet per reel that is actually relevant, most useful first, in this form:
+   - **[n] Short title** — what this reel shows and how it explains or recommends it: name the tools, steps, prices or claims it makes.
+3. Leave out reels that do not fit the question. If none fit, say so in one sentence.
+Cite reels only as [n]. No JSON, no preamble.`;
+}
+
+/** Reel numbers the answer cites, in first-mention order. */
+export function citedNumbers(answer: string): number[] {
+  const seen: number[] = [];
+  for (const m of answer.matchAll(/\[(\d+)\]/g)) {
+    const n = Number(m[1]);
+    if (!seen.includes(n)) seen.push(n);
+  }
+  return seen;
+}
