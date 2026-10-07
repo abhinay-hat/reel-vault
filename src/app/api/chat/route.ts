@@ -6,7 +6,7 @@ import {
   parseQueryTerms,
   type RagSource,
 } from "@/lib/ai";
-import { llmComplete, llmEnabled } from "@/lib/llm";
+import { llmComplete, llmReachable } from "@/lib/llm";
 import { ragSearch, searchItemsExpanded, type Item, type RagHit } from "@/lib/db";
 
 export const maxDuration = 120;
@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
   const q = typeof query === "string" ? query.trim() : "";
   if (!q) return NextResponse.json({ answer: "", items: [], sources: [], terms: [] });
 
-  const useLlm = llmEnabled();
+  const useLlm = await llmReachable();
   let terms = parseQueryTerms("", q);
   if (useLlm) {
     try {
@@ -45,7 +45,7 @@ export async function POST(req: NextRequest) {
   const sources = hits.map((h, i) => ({ n: i + 1, id: h.item.id, evidence: h.evidence }));
   const items: Item[] = hits.map((h) => h.item);
   if (!useLlm || !hits.length) {
-    return NextResponse.json({ answer: "", items, sources, terms });
+    return NextResponse.json({ answer: "", items, sources, terms, llm: useLlm });
   }
 
   try {
