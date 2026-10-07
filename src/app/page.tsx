@@ -1,5 +1,7 @@
 import Link from "next/link";
-import { filterItems, vaultFacets, type Item, type VaultFacets, type VaultFilter, type VaultStatus } from "@/lib/db";
+import { useLocation } from "react-router";
+import type { Item, VaultFacets, VaultFilter } from "@/lib/db";
+import { useJson } from "@/lib/use-json";
 import Shell from "@/components/Shell";
 import SearchBar from "@/components/SearchBar";
 import VaultFilters, { filterHref } from "@/components/VaultFilters";
@@ -8,45 +10,32 @@ import { EmptyState } from "@/components/EmptyState";
 import RefreshButton from "@/components/RefreshButton";
 import { BUTTON_SMALL, PANEL_HEADER } from "@/components/stack";
 
-// Rendering every card was the slowness: 2,815 cards = 11 MB of HTML, 14–21 s.
-const PAGE_SIZE = 60;
+type VaultPage = {
+  filter: VaultFilter;
+  facets: VaultFacets;
+  total: number;
+  matched: number;
+  page: number;
+  pages: number;
+  items: Item[];
+};
 
-export default async function Dashboard({
-  searchParams,
-}: {
-  searchParams: Promise<Record<string, string | undefined>>;
-}) {
-  const sp = await searchParams;
-  const ym = (v?: string) => (v && /^\d{4}-\d{2}$/.test(v) ? v : undefined);
-  const f: VaultFilter = {
-    q: sp.q?.trim() || undefined,
-    category: sp.category || undefined,
-    tag: sp.tag || undefined,
-    kind: sp.kind || undefined,
-    from: ym(sp.from),
-    to: ym(sp.to),
-    status: (sp.status as VaultStatus) || undefined,
-    sort: sp.sort === "old" ? "old" : "new",
-  };
+const EMPTY_FACETS: VaultFacets = { total: 0, categories: [], tags: [], kinds: [], months: null };
+
+export default function Dashboard() {
+  // The URL is the whole state; the server parses it, filters and pages (60 a page).
+  const { search } = useLocation();
+  const loaded = useJson<VaultPage>(`/api/vault${search}`);
+  const data = loaded.state === "ready" ? loaded.data : null;
+  const unreachable = loaded.state === "error";
+  const f: VaultFilter = data?.filter ?? { sort: "new" };
   const { q, category } = f;
-  const page = Math.max(1, Number.parseInt(sp.page ?? "1", 10) || 1);
-
-  let matched: Item[] = [];
-  let facets: VaultFacets = { total: 0, categories: [], tags: [], kinds: [], months: null };
-  let total = 0;
-  let unreachable = false;
-
-  try {
-    facets = await vaultFacets();
-    total = facets.total;
-    matched = await filterItems(f);
-  } catch {
-    unreachable = true;
-  }
-
-  const pages = Math.max(1, Math.ceil(matched.length / PAGE_SIZE));
-  const current = Math.min(page, pages);
-  const items = matched.slice((current - 1) * PAGE_SIZE, current * PAGE_SIZE);
+  const facets = data?.facets ?? EMPTY_FACETS;
+  const total = data?.total ?? 0;
+  const matchedCount = data?.matched ?? 0;
+  const items: Item[] = data?.items ?? [];
+  const pages = data?.pages ?? 1;
+  const current = data?.page ?? 1;
   const pageHref = (n: number) => {
     const base = filterHref(f, { sort: f.sort === "old" ? "old" : "" });
     if (n <= 1) return base;
@@ -64,22 +53,25 @@ export default async function Dashboard({
       : "The whole stack";
 
   return (
-    <Shell cardCount={unreachable ? null : total}>
+    <Shell cardCount={unreachable || !data ? null : total}>
       <div className="space-y-5">
         <div className="hand bg-paper">
           <div className={PANEL_HEADER}>
             <span>{dealt}</span>
             <span className="tabular">
-              {unreachable ? "—" : `${matched.length} of ${total}`}
+              {unreachable || !data ? "—" : `${matchedCount} of ${total}`}
             </span>
           </div>
 
           <div className="space-y-3 px-3 py-3">
-            <SearchBar defaultValue={activeQuery} keep={{ ...f, sort: f.sort === "old" ? "old" : undefined }} />
+            {/* Uncontrolled inputs: mount once the URL's filter is known. */}
+            {data ? (
+              <SearchBar key={search} defaultValue={activeQuery} keep={{ ...f, sort: f.sort === "old" ? "old" : undefined }} />
+            ) : null}
 
-            {!unreachable ? (
+            {data ? (
               <>
-                <VaultFilters f={f} facets={facets} />
+                <VaultFilters key={search} f={f} facets={facets} />
                 <div className="flex justify-end">
                   <RefreshButton />
                 </div>
@@ -88,9 +80,9 @@ export default async function Dashboard({
 
             {activeQuery && !unreachable ? (
               <p className="text-[13px]">
-                {matched.length === 0
+                {matchedCount === 0
                   ? `No card matches “${activeQuery}”.`
-                  : `${matched.length} ${matched.length === 1 ? "card" : "cards"} match “${activeQuery}”.`}{" "}
+                  : `${matchedCount} ${matchedCount === 1 ? "card" : "cards"} match “${activeQuery}”.`}{" "}
                 <Link
                   href="/"
                   className="font-display underline decoration-2 underline-offset-2 hover:bg-ink hover:text-paper hover:no-underline"

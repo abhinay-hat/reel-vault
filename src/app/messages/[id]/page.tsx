@@ -2,30 +2,20 @@ import Link from "next/link";
 import Shell from "@/components/Shell";
 import MessageThread from "@/components/MessageThread";
 import { EmptyState } from "@/components/EmptyState";
-import { getConversation, type Conversation } from "@/lib/db";
+import { useParams } from "react-router";
+import type { Conversation, Message } from "@/lib/db";
+import { useJson } from "@/lib/use-json";
 import { ArrowLeftIcon } from "@/components/icons";
 import { BUTTON } from "@/components/stack";
 
-export default async function ConversationPage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
-  const { id } = await params;
+export default function ConversationPage() {
+  const { id = "" } = useParams();
+  const loaded = useJson<{ conversation: Conversation; messages: Message[] }>(
+    `/api/conversations/${encodeURIComponent(id)}`,
+  );
 
-  let conversation: Conversation | null = null;
-  let messages: Awaited<ReturnType<typeof getConversation>>["messages"] = [];
-  let failed = false;
-
-  try {
-    const result = await getConversation(id);
-    conversation = result.conversation;
-    messages = result.messages;
-  } catch {
-    failed = true;
-  }
-
-  if (failed || !conversation) {
+  if (loaded.state === "loading") return <Shell>{null}</Shell>;
+  if (loaded.state !== "ready") {
     return (
       <Shell>
         <EmptyState
@@ -44,7 +34,7 @@ export default async function ConversationPage({
 
   return (
     <Shell>
-      <MessageThread conversation={conversation} messages={messages} />
+      <MessageThread conversation={loaded.data.conversation} messages={loaded.data.messages} />
     </Shell>
   );
 }

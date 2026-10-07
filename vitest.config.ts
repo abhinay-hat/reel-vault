@@ -7,5 +7,10 @@ const __dirname = path.dirname(__filename);
 
 export default defineConfig({
   test: { environment: "node", passWithNoTests: true },
-  resolve: { alias: { "@": path.resolve(__dirname, "./src") } },
+  resolve: {
+    alias: {
+      "@": path.resolve(__dirname, "./src"),
+      "next/server": path.resolve(__dirname, "./src/shims/next-server.ts"),
+    },
+  },
 });

@@ -2,18 +2,14 @@ import Link from "next/link";
 import Shell from "@/components/Shell";
 import ConversationList from "@/components/ConversationList";
 import { EmptyState } from "@/components/EmptyState";
-import { listConversations, type Conversation } from "@/lib/db";
+import type { Conversation } from "@/lib/db";
+import { useJson } from "@/lib/use-json";
 import { PANEL_HEADER } from "@/components/stack";
 
-export default async function MessagesPage() {
-  let conversations: Conversation[] = [];
-  let failed = false;
-
-  try {
-    conversations = await listConversations();
-  } catch {
-    failed = true;
-  }
+export default function MessagesPage() {
+  const loaded = useJson<Conversation[]>("/api/conversations");
+  const conversations: Conversation[] = loaded.state === "ready" ? loaded.data : [];
+  const failed = loaded.state === "error";
 
   return (
     <Shell>

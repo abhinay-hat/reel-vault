@@ -2,7 +2,9 @@ import Link from "next/link";
 import Shell from "@/components/Shell";
 import ItemActions from "@/components/ItemActions";
 import { EmptyState } from "@/components/EmptyState";
-import { getItem, getCardPosition } from "@/lib/db";
+import { useParams } from "react-router";
+import type { CardPosition, Item } from "@/lib/db";
+import { useJson } from "@/lib/use-json";
 import CardThumb from "@/components/CardThumb";
 import ClipPlayer, { InstagramEmbed } from "@/components/ClipPlayer";
 import CardNav from "@/components/CardNav";
@@ -10,15 +12,12 @@ import MarkCard from "@/components/MarkCard";
 import { ArrowLeftIcon } from "@/components/icons";
 import { BUTTON, PANEL, PANEL_HEADER } from "@/components/stack";
 
-export default async function ItemDetail({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
-  const { id } = await params;
-  const [item, position] = await Promise.all([getItem(id), getCardPosition(id)]);
+export default function ItemDetail() {
+  const { id = "" } = useParams();
+  const loaded = useJson<{ item: Item; position: CardPosition | null }>(`/api/card/${id}`);
 
-  if (!item) {
+  if (loaded.state === "loading") return <Shell>{null}</Shell>;
+  if (loaded.state !== "ready") {
     return (
       <Shell>
         <EmptyState
@@ -35,6 +34,7 @@ export default async function ItemDetail({
     );
   }
 
+  const { item, position } = loaded.data;
   const described = Boolean(item.summary && item.summary.trim());
   const fromDM = item.origin === "dm_shared";
 

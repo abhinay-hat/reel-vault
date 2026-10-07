@@ -1,16 +1,14 @@
-"use server";
-import { revalidatePath } from "next/cache";
-import * as db from "@/lib/db";
-import { detectSource } from "@/lib/metadata";
-
-export async function addManualItem(form: { url: string; title: string; summary?: string; category?: string; tags?: string[]; notes?: string }) {
-  await db.upsertItem({
-    url: form.url, source: detectSource(form.url), title: form.title || "Untitled",
-    author: null, thumbnail: null, summary: form.summary ?? null,
-    category: form.category || "Uncategorized", tags: form.tags ?? [], notes: form.notes ?? null,
-    origin: "manual",
+// Were Next server actions; now plain calls to the card API (server/app.ts).
+export async function saveNotes(id: string, notes: string): Promise<void> {
+  const res = await fetch(`/api/card/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ notes }),
   });
-  revalidatePath("/");
+  if (!res.ok) throw new Error(`saveNotes ${res.status}`);
 }
-export async function saveNotes(id: string, notes: string) { await db.updateItem(id, { notes }); revalidatePath(`/item/${id}`); }
-export async function deleteItem(id: string) { await db.removeItem(id); revalidatePath("/"); }
+
+export async function deleteItem(id: string): Promise<void> {
+  const res = await fetch(`/api/card/${encodeURIComponent(id)}`, { method: "DELETE" });
+  if (!res.ok) throw new Error(`deleteItem ${res.status}`);
+}
