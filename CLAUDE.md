@@ -4,14 +4,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 @AGENTS.md
 
-> Heed `AGENTS.md`: this is Next.js **16.2.6** (App Router, React 19, Turbopack). APIs and conventions differ from older Next.js — consult `node_modules/next/dist/docs/` before writing framework code.
+> Heed `AGENTS.md`: this is a **Vite 8 + React 19 SPA with a Hono API** (migrated off Next.js). Pages live in `src/app/**/page.tsx` as client components that fetch JSON; `src/main.tsx` holds the route table.
 
 ## Commands
 
 ```bash
-npm run dev      # Next.js dev server on http://localhost:3210 (NOT 3000)
-npm run build    # production build
-npm start        # production server on port 3210
+npm run dev      # Vite dev server + API on http://localhost:3210 (one process)
+npm run build    # dist/ (SPA) + dist-server/index.js (Hono API + static)
+npm start        # production server on port 3210 (loads .env.local)
 npm test         # vitest run (one-shot, no watch)
 
 npx vitest run src/lib/instagram-export.test.ts   # single test file
@@ -20,7 +20,7 @@ npx vitest run -t "parses saved posts"            # single test by name
 
 Tests live next to their units (`src/lib/*.test.ts`) and cover the pure parser/prompt helpers (`instagram-export`, `metadata`, `ai`) — not the routes or DB.
 
-Two long-running processes in dev: the Next app (`start-reel-vault.command`) and the optional Python IG sidecar (`ig-bridge/start-bridge.command`, FastAPI on `127.0.0.1:8765`). Both are double-clickable `.command` scripts.
+Two long-running processes in dev: the Vite app (`start-reel-vault.command`) and the optional Python IG sidecar (`ig-bridge/start-bridge.command`, FastAPI on `127.0.0.1:8765`). Both are double-clickable `.command` scripts.
 
 ## Architecture
 
@@ -28,7 +28,7 @@ A personal "vault" for saved Instagram reels, posts, DM-shared links, and articl
 
 ### Data layer — `src/lib/db.ts`
 
-The single source of truth. Local SQLite via Node's built-in `node:sqlite` (needs Node 24). Notable: the module is loaded at runtime through `process.getBuiltinModule("node:sqlite")`, **not** a static `import` — Turbopack's externalization shim breaks the static form in ESM server chunks. Keep that pattern if you touch it.
+The single source of truth. Local SQLite via Node's built-in `node:sqlite` (needs Node 24). Notable: the module is loaded at runtime through `process.getBuiltinModule("node:sqlite")`, **not** a static `import` — keeps `node:sqlite` out of bundling (`ssr.external` in `vite.config.ts`). Keep that pattern if you touch it.
 
 - DB path: `data/reel-vault.db` (override with `REEL_VAULT_DB`). Schema is created on first `db()` call — no migration runner.
 - Three tables: `items` (unique by `url`), `conversations` (unique by `thread_key`), `messages` (unique by `conversation_id + external_id`). Writes are idempotent: items/conversations **upsert**, messages **insert-or-ignore**.
@@ -38,9 +38,9 @@ The single source of truth. Local SQLite via Node's built-in `node:sqlite` (need
 
 ### Ingestion — three independent paths, all funnel into `db.ts`
 
-1. **Instagram private-API sidecar** (`ig-bridge/main.py` + `src/lib/ig.ts` + `src/app/api/ig/*`). The Next routes are thin proxies to the FastAPI sidecar via `bridge()`. Flow: `POST /api/ig/gather` starts a background job → client polls `GET /api/ig/gather/[id]` → each poll pulls new records and runs `storeGathered()`, which maps sidecar records (`reel`/`post`/`dm_share`/`dm_link`/`dm_text`/`article`) into items/conversations/messages **incrementally** (a per-job cursor stores only the unseen slice). The sidecar uses `instagrapi` (Instagram's **private** API — ToS-violating, can get the account banned; documented at the top of `main.py`) and enforces hard throttles: `MIN_GATHER_INTERVAL_HOURS` (default 20) and a `COOLDOWN_HOURS` (default 6) after any rate-limit/challenge.
+1. **Instagram private-API sidecar** (`ig-bridge/main.py` + `src/lib/ig.ts` + `src/app/api/ig/*`). The API routes are thin proxies to the FastAPI sidecar via `bridge()`. Flow: `POST /api/ig/gather` starts a background job → client polls `GET /api/ig/gather/[id]` → each poll pulls new records and runs `storeGathered()`, which maps sidecar records (`reel`/`post`/`dm_share`/`dm_link`/`dm_text`/`article`) into items/conversations/messages **incrementally** (a per-job cursor stores only the unseen slice). The sidecar uses `instagrapi` (Instagram's **private** API — ToS-violating, can get the account banned; documented at the top of `main.py`) and enforces hard throttles: `MIN_GATHER_INTERVAL_HOURS` (default 20) and a `COOLDOWN_HOURS` (default 6) after any rate-limit/challenge.
 2. **Instagram data-export ZIP** (`src/app/api/ingest` → `src/lib/connectors/export-connector.ts`). Unzips with `fflate`, routes files by path regex to the pure parsers in `src/lib/instagram-export.ts` (`parseSavedPosts` / `parseLikedPosts` / `parseInbox`).
-3. **Share capture** (`src/app/api/share`). Token-auth (`Bearer SHARE_TOKEN`) endpoint for the iOS Shortcut, plus the PWA Web Share Target (`public/manifest.json`), the desktop bookmarklet (`/bookmarklet`), and the manual-add server action (`src/app/actions.ts`). Extracts the first URL, best-effort OpenGraph fetch, saves with `summary: null` so the enricher picks it up.
+3. **Share capture** (`src/app/api/share`). Token-auth (`Bearer SHARE_TOKEN`) endpoint for the iOS Shortcut, plus the PWA Web Share Target (`public/manifest.json`), the desktop bookmarklet (`/bookmarklet`). Extracts the first URL, best-effort OpenGraph fetch, saves with `summary: null` so the enricher picks it up.
 
 The `Connector` interface (`src/lib/connectors/types.ts`) is the seam for adding new import sources.
 
@@ -66,13 +66,13 @@ Tools: `search_vault` (ranked by *where* a term hits — title beats a passing t
 
 Register: `claude mcp add reel-vault -- node /abs/path/mcp/reel-vault-mcp.mjs`
 
-### Auth — `src/middleware.ts` + `src/lib/passcode.ts`
+### Auth — `server/app.ts` + `src/lib/passcode.ts`
 
-A single shared passcode gates the whole app via the `rv_auth` cookie. **If `APP_PASSCODE` is unset the gate is disabled entirely.** `/login`, `/api/login`, and `/api/share` (bearer-token, not cookie) are exempt.
+A single shared passcode gates every `/api/*` call via the `rv_auth` cookie (the SPA shell is static; a 401 sends the page to `/login`). **If `APP_PASSCODE` is unset the gate is disabled entirely.** `/login`, `/api/login`, and `/api/share` (bearer-token, not cookie) are exempt.
 
 ### Routes & UI
 
-Server Components fetch directly from `db.ts`; mutations go through Server Actions (`src/app/actions.ts`) or route handlers. Pages: `/` dashboard (search + category filter), `/item/[id]`, `/messages` + `/messages/[id]`, `/connect` (sidecar login/gather UI), `/ingest` (export upload), `/add`, `/bookmarklet`. Components in `src/components/` (`Shell`, `ItemGrid`/`ItemCard`, `MessageThread`, etc.). Tailwind v4 with a custom token palette (`ink`, `surface`, `accent`, …) defined in `globals.css`.
+Pages are client components loading JSON with `useJson` (`src/lib/use-json.ts`) from page endpoints in `server/app.ts` (`/api/vault`, `/api/card/:id`, `/api/conversations[/:id]`); the original route handlers stay in `src/app/api/**/route.ts`. Pages: `/` dashboard (search + category filter), `/item/[id]`, `/messages` + `/messages/[id]`, `/connect` (sidecar login/gather UI), `/ingest` (export upload), `/add`, `/bookmarklet`. Components in `src/components/` (`Shell`, `ItemGrid`/`ItemCard`, `MessageThread`, etc.). Tailwind v4 with a custom token palette (`ink`, `surface`, `accent`, …) defined in `globals.css`.
 
 ## Environment variables
 
