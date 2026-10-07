@@ -92,3 +92,10 @@ def test_urls_survive_redaction():
     assert ocr._SECRET_RE.sub("[redacted]", url) == url
     long_tok = "A" * 20 + "b9" * 15
     assert ocr._SECRET_RE.sub("[redacted]", f"key {long_tok} end") == "key [redacted] end"
+
+
+def test_spaceless_ocr_text_not_redacted():
+    t = "Beforeenrolling,lookupyourorganizationtoseeifyouhaveaDUNSnumber"
+    assert ocr._SECRET_RE.sub("[redacted]", t) == t
+    assert ocr._SECRET_RE.sub("[redacted]", "mayhavealreadyassignedonetoyouIfyourorganizationisnotlisted") \
+        == "mayhavealreadyassignedonetoyouIfyourorganizationisnotlisted"
