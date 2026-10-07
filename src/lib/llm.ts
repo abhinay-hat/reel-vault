@@ -79,3 +79,26 @@ export async function llmComplete(prompt: string, maxTokens = 500): Promise<stri
   };
   return data.choices?.[0]?.message?.content ?? "";
 }
+
+// The local LLM may live on another machine (the RTX box) that is only reachable
+// on the office LAN. Probe it once with a short timeout and remember the answer
+// for a minute, so off-LAN chat falls back instantly instead of waiting out two
+// 10 s connect timeouts per question.
+let reachable: { ok: boolean; at: number } | null = null;
+const REACHABILITY_TTL_MS = 60_000;
+
+export async function llmReachable(): Promise<boolean> {
+  if (!llmEnabled()) return false;
+  if (provider() === "groq") return true;
+  if (reachable && Date.now() - reachable.at < REACHABILITY_TTL_MS) return reachable.ok;
+  let ok = false;
+  try {
+    const res = await fetch(`${baseUrl()}/models`, { signal: AbortSignal.timeout(1_500) });
+    ok = res.ok;
+  } catch {
+    ok = false;
+  }
+  if (!ok && reachable?.ok !== false) console.warn(`[llm] ${baseUrl()} unreachable; answering with search results only`);
+  reachable = { ok, at: Date.now() };
+  return ok;
+}

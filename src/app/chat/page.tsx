@@ -12,7 +12,7 @@ import { BUTTON_PRIMARY, PANEL, PANEL_HEADER } from "@/components/stack";
 // Ask the stack in plain words; it answers and deals the cards it found.
 // Contract (Agent B): POST /api/chat { query } -> { answer: string, items: Item[] }.
 type Source = { n: number; id: string; evidence: string };
-type ChatResponse = { answer?: string; items?: Item[]; sources?: Source[] };
+type ChatResponse = { answer?: string; items?: Item[]; sources?: Source[]; llm?: boolean };
 
 /** **bold** and [n] citations (linked to the cited card); everything else is text. */
 function Inline({ text, idFor }: { text: string; idFor: (n: number) => string | undefined }) {
@@ -78,6 +78,7 @@ export default function ChatPage() {
   const [answer, setAnswer] = useState("");
   const [items, setItems] = useState<Item[]>([]);
   const [sources, setSources] = useState<Source[]>([]);
+  const [offline, setOffline] = useState(false);
   const [error, setError] = useState("");
 
   const busy = phase === "asking";
@@ -105,6 +106,7 @@ export default function ChatPage() {
       setAnswer(typeof data.answer === "string" ? data.answer : "");
       setItems(Array.isArray(data.items) ? data.items : []);
       setSources(Array.isArray(data.sources) ? data.sources : []);
+      setOffline(data.llm === false);
       setPhase("answered");
     } catch {
       setError("Could not reach the stack. Check that the app is running, then ask again.");
@@ -215,6 +217,13 @@ export default function ChatPage() {
                 </div>
                 <Answer text={answer} idFor={(n) => sources.find((s) => s.n === n)?.id} />
               </div>
+            ) : null}
+
+            {offline && items.length > 0 ? (
+              <p className="hand stipple-1 px-3 py-2 text-[13px]">
+                The AI that writes answers runs on the RTX box, which is not reachable from this
+                network. These are the best-matching reels, with the lines where they mention it.
+              </p>
             ) : null}
 
             {items.length > 0 ? (
