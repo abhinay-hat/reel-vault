@@ -16,7 +16,9 @@ _SECRET_RE = re.compile(
     r"\b[A-Fa-f0-9]{32,}\b|"
     # No "/" and not inside a URL path: long repo paths were being redacted
     # ("raw.githubusercontent.[redacted].md"), which wrecked saved links.
-    r"(?<![/.\w])[A-Za-z0-9+_-]{40,}\b"
+    # Needs a digit: OCR that lost its spaces ("Beforeenrollinglookup...") is
+    # 40+ letters too, and is content, not a credential.
+    r"(?<![/.\w])(?=[A-Za-z+_-]*\d)[A-Za-z0-9+_-]{40,}\b"
 )
 
 _DEVANAGARI = re.compile(r"[\u0900-\u097F]")
@@ -25,18 +27,24 @@ _LETTER = re.compile(r"[^\W\d_]", re.UNICODE)
 
 
 def _rapid_ocr(path: Path) -> str:
-    """Non-Mac stand-in for Vision: RapidOCR (ONNX), same line/redact/cap contract."""
+    """Non-Mac stand-in for Vision: RapidOCR 3 (PP-OCRv5), same line/redact/cap contract.
+
+    v5 over the v4 default: on screen-recorded web pages v4 dropped the spaces in
+    2/3 of long lines ("Beforeenrolling,lookupyour..."); v5 ~1/5, 2.7x faster.
+    """
     global _RAPID
     try:
         if _RAPID is None:
-            from rapidocr_onnxruntime import RapidOCR
+            from rapidocr import RapidOCR
 
             _RAPID = RapidOCR()
-        result, _ = _RAPID(str(path))
+        r = _RAPID(str(path))
     except Exception:
         return ""
-    # result: [[box, text, score], ...]; box[0] is the top-left corner.
-    rows = sorted(result or [], key=lambda r: (r[0][0][1], r[0][0][0]))
+    if r.txts is None:
+        return ""
+    # boxes[i][0] is the top-left corner; sort top→bottom, then left→right.
+    rows = sorted(zip(r.boxes, r.txts, r.scores), key=lambda x: (x[0][0][1], x[0][0][0]))
     lines = [re.sub(r"\s+", " ", t).strip() for _b, t, sc in rows if float(sc) >= 0.5]
     txt = _SECRET_RE.sub("[redacted]", "\n".join(l for l in lines if l))
     return txt[:1000]
