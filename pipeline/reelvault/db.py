@@ -90,7 +90,9 @@ def queue(
                    when 'pending' then 1
                    else 2
                  end,
-                 added_at desc
+                 -- Original Instagram date, not import time: a bulk thread import
+                 -- stamps every row with the same added_at.
+                 coalesce(created_at, added_at) desc
     """
     params: list[Any] = list(statuses)
     if limit is not None:

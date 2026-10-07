@@ -115,3 +115,13 @@ def test_stats_no_text_extracted(tmp_path):
     db.save(con, "m", content_status="transcribed", caption=None, transcript=None, ocr_text=None)
     s = db.stats(con)
     assert s["no_text"] == 1
+
+
+def test_queue_newest_original_date_first(tmp_path):
+    # A bulk thread import gives every row the same added_at; order by the
+    # reel's own date so the newest shares are extracted first.
+    con = _fresh(tmp_path)
+    for i, created in enumerate(["2023-01-01", "2026-09-01", "2025-05-01"]):
+        _insert(con, id=f"r{i}", url=f"https://instagram.com/reel/R{i}/", content_status="pending",
+                created_at=created, added_at="2026-10-07T00:00:00Z")
+    assert [r["created_at"] for r in db.queue(con, None)] == ["2026-09-01", "2025-05-01", "2023-01-01"]
