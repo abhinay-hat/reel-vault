@@ -8,12 +8,12 @@ import { BUTTON_PRIMARY } from "@/components/stack";
  */
 export default function SearchBar({
   defaultValue = "",
-  category = "",
+  keep = {},
   placeholder = "Type what it was about…",
 }: {
   defaultValue?: string;
-  /** Kept as a hidden field so finding does not silently drop the active filter. */
-  category?: string;
+  /** Active filters, kept as hidden fields so finding does not silently drop them. */
+  keep?: Record<string, string | undefined>;
   placeholder?: string;
 }) {
   return (
@@ -21,7 +21,9 @@ export default function SearchBar({
       <label htmlFor="vault-find" className="sr-only">
         Find a card
       </label>
-      {category ? <input type="hidden" name="category" value={category} /> : null}
+      {Object.entries(keep).map(([k, v]) =>
+        v && k !== "q" ? <input key={k} type="hidden" name={k} value={v} /> : null,
+      )}
 
       <div className="hand flex items-stretch bg-paper focus-within:outline-3 focus-within:outline-offset-2 focus-within:outline-ink">
         <span className="flex items-center border-r-2 border-ink px-2.5">

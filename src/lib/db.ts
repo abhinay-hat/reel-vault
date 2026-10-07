@@ -413,14 +413,98 @@ export async function getVaultState(): Promise<VaultState> {
   };
 }
 
+// The reel's own Instagram date, not import time: one DM-thread import stamps
+// thousands of rows with the same added_at. rowid breaks ties (insertion order).
+const STACK_ORDER = "coalesce(created_at, added_at) desc, rowid desc";
+
 export async function listItems(category?: string): Promise<Item[]> {
   const d = db();
-  // Tie-break by rowid desc (true insertion order): a whole sync batch can share
-  // one timestamp, so without this the newest-inserted rows fall to the bottom.
   const rows = category
-    ? (d.prepare("select * from items where category = ? order by added_at desc, rowid desc").all(category) as unknown as ItemRow[])
-    : (d.prepare("select * from items order by added_at desc, rowid desc").all() as unknown as ItemRow[]);
+    ? (d.prepare(`select * from items where category = ? order by ${STACK_ORDER}`).all(category) as unknown as ItemRow[])
+    : (d.prepare(`select * from items order by ${STACK_ORDER}`).all() as unknown as ItemRow[]);
   return rows.map(rowToItem);
+}
+
+export type VaultStatus = "described" | "undescribed" | "spoken" | "onscreen" | "unavailable";
+
+export interface VaultFilter {
+  q?: string;
+  category?: string;
+  tag?: string;
+  /** Entity kind the card must mention (anime, tool, ai_model, …). */
+  kind?: string;
+  /** Inclusive YYYY-MM bounds on the reel's original date. */
+  from?: string;
+  to?: string;
+  status?: VaultStatus;
+  sort?: "new" | "old";
+}
+
+const STATUS_SQL: Record<VaultStatus, string> = {
+  described: "coalesce(summary,'') != ''",
+  undescribed: "coalesce(summary,'') = '' and content_status != 'unavailable'",
+  spoken: "coalesce(transcript,'') != ''",
+  onscreen: "coalesce(ocr_text,'') != ''",
+  unavailable: "content_status = 'unavailable'",
+};
+
+/** Every vault filter in one query; empty fields are ignored. */
+export async function filterItems(f: VaultFilter): Promise<Item[]> {
+  const where: string[] = [];
+  const params: string[] = [];
+  const q = f.q?.trim().toLowerCase();
+  if (q) {
+    const like = `%${q}%`;
+    where.push(`(lower(title) like ? or lower(coalesce(summary,'')) like ? or lower(coalesce(notes,'')) like ?
+      or lower(category) like ? or lower(tags) like ? or lower(coalesce(caption,'')) like ?
+      or lower(coalesce(transcript,'')) like ? or lower(coalesce(ocr_text,'')) like ? or lower(entities) like ?)`);
+    params.push(like, like, like, like, like, like, like, like, like);
+  }
+  if (f.category) { where.push("category = ?"); params.push(f.category); }
+  // tags / entities are JSON text written by JSON.stringify, so the quoted
+  // forms below match whole values, not substrings of other tags.
+  if (f.tag) { where.push("tags like ?"); params.push(`%${JSON.stringify(f.tag)}%`); }
+  if (f.kind) { where.push("entities like ?"); params.push(`%"kind":${JSON.stringify(f.kind)}%`); }
+  if (f.from) { where.push("coalesce(created_at, added_at) >= ?"); params.push(`${f.from}-01`); }
+  if (f.to) { where.push("coalesce(created_at, added_at) < ?"); params.push(nextMonth(f.to)); }
+  if (f.status && STATUS_SQL[f.status]) where.push(STATUS_SQL[f.status]);
+  const order = f.sort === "old" ? "coalesce(created_at, added_at) asc, rowid asc" : STACK_ORDER;
+  const sql = `select * from items ${where.length ? `where ${where.join(" and ")}` : ""} order by ${order}`;
+  return (db().prepare(sql).all(...params) as unknown as ItemRow[]).map(rowToItem);
+}
+
+/** "2025-12" -> "2026-01-01": exclusive upper bound for a YYYY-MM `to`. */
+export function nextMonth(ym: string): string {
+  const [y, m] = ym.split("-").map(Number);
+  return m === 12 ? `${y + 1}-01-01` : `${y}-${String(m + 1).padStart(2, "0")}-01`;
+}
+
+export interface VaultFacets {
+  total: number;
+  categories: [string, number][];
+  tags: [string, number][];
+  kinds: [string, number][];
+  /** Earliest and latest YYYY-MM in the vault, for the date inputs' bounds. */
+  months: [string, string] | null;
+}
+
+/** Counts behind the filter controls. ponytail: JS pass over all rows; fine at a few thousand cards, move to SQL json_each if it gets slow. */
+export async function vaultFacets(): Promise<VaultFacets> {
+  const rows = db()
+    .prepare("select category, tags, entities, coalesce(created_at, added_at) as d from items")
+    .all() as unknown as { category: string | null; tags: string; entities: string | null; d: string }[];
+  const cat = new Map<string, number>(), tag = new Map<string, number>(), kind = new Map<string, number>();
+  const bump = (m: Map<string, number>, k: string) => m.set(k, (m.get(k) ?? 0) + 1);
+  let lo = "", hi = "";
+  for (const r of rows) {
+    if (r.category) bump(cat, r.category);
+    for (const t of safeArray(r.tags)) bump(tag, t);
+    for (const k of new Set(safeEntities(r.entities ?? "[]").map((e) => e.kind))) bump(kind, k);
+    const m = (r.d ?? "").slice(0, 7);
+    if (m) { if (!lo || m < lo) lo = m; if (!hi || m > hi) hi = m; }
+  }
+  const byCount = (m: Map<string, number>) => [...m].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  return { total: rows.length, categories: byCount(cat), tags: byCount(tag).slice(0, 24), kinds: byCount(kind), months: lo ? [lo, hi] : null };
 }
 
 export interface CardPosition {
@@ -438,7 +522,7 @@ export interface CardPosition {
  */
 export async function getCardPosition(id: string): Promise<CardPosition | null> {
   const rows = db()
-    .prepare("select id from items order by added_at desc, rowid desc")
+    .prepare(`select id from items order by ${STACK_ORDER}`)
     .all() as unknown as { id: string }[];
 
   const index = rows.findIndex((r) => r.id === id);
@@ -474,8 +558,14 @@ export async function upsertItem(item: NewItem): Promise<Item> {
     `insert into items (id, url, source, title, author, thumbnail, summary, category, tags, notes, origin, created_at, added_at, media_file, video, video_file, caption, transcript, ocr_text, entities, actions, content_status, content_error)
      values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
      on conflict(url) do update set
-       source=excluded.source, title=excluded.title, author=excluded.author,
-       thumbnail=excluded.thumbnail, category=excluded.category, origin=excluded.origin,
+       source=excluded.source, author=excluded.author,
+       thumbnail=excluded.thumbnail, origin=excluded.origin,
+       -- Real Instagram metadata may upgrade a title, but a "Shared by <id>"
+       -- placeholder must never replace one (AI- or owner-written). Once a card
+       -- is described its category is the AI's, not the "Shared in DMs" bucket:
+       -- taking excluded.* here re-filed 373 described cards under one category.
+       title=case when excluded.title like 'Shared by %' then items.title else excluded.title end,
+       category=case when coalesce(items.summary,'') != '' then items.category else excluded.category end,
        created_at=excluded.created_at, video=excluded.video,
        -- Everything written AFTER ingest survives a re-sync. Instagram never
        -- sends a summary, tags, or notes, so taking excluded.* here meant every

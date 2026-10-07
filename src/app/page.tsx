@@ -1,38 +1,53 @@
 import Link from "next/link";
-import { listItems, searchItems, type Item } from "@/lib/db";
+import { filterItems, vaultFacets, type Item, type VaultFacets, type VaultFilter, type VaultStatus } from "@/lib/db";
 import Shell from "@/components/Shell";
 import SearchBar from "@/components/SearchBar";
+import VaultFilters from "@/components/VaultFilters";
 import { ItemGrid } from "@/components/ItemGrid";
 import { EmptyState } from "@/components/EmptyState";
 import RefreshButton from "@/components/RefreshButton";
-import { BUTTON_SMALL, PANEL_HEADER } from "@/components/stack";
+import { PANEL_HEADER } from "@/components/stack";
 
 export default async function Dashboard({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; category?: string }>;
+  searchParams: Promise<Record<string, string | undefined>>;
 }) {
-  const { q, category } = await searchParams;
+  const sp = await searchParams;
+  const ym = (v?: string) => (v && /^\d{4}-\d{2}$/.test(v) ? v : undefined);
+  const f: VaultFilter = {
+    q: sp.q?.trim() || undefined,
+    category: sp.category || undefined,
+    tag: sp.tag || undefined,
+    kind: sp.kind || undefined,
+    from: ym(sp.from),
+    to: ym(sp.to),
+    status: (sp.status as VaultStatus) || undefined,
+    sort: sp.sort === "old" ? "old" : "new",
+  };
+  const { q, category } = f;
 
   let items: Item[] = [];
-  let categories: string[] = [];
+  let facets: VaultFacets = { total: 0, categories: [], tags: [], kinds: [], months: null };
   let total = 0;
   let unreachable = false;
 
   try {
-    const all = await listItems();
-    total = all.length;
-    categories = Array.from(new Set(all.map((i) => i.category).filter(Boolean))).sort();
-    items = q?.trim() ? await searchItems(q) : await listItems(category);
+    facets = await vaultFacets();
+    total = facets.total;
+    items = await filterItems(f);
   } catch {
     unreachable = true;
   }
 
   const activeQuery = q?.trim() ?? "";
+  const filtered = Boolean(category || f.tag || f.kind || f.from || f.to || f.status);
   const dealt = activeQuery
     ? `Found: ${activeQuery}`
-    : category
-      ? `Deal: ${category}`
+    : filtered
+      ? `Deal: ${[category, f.tag && `#${f.tag}`, f.kind, f.from || f.to ? `${f.from ?? "…"} → ${f.to ?? "…"}` : null, f.status]
+          .filter(Boolean)
+          .join(" · ")}`
       : "The whole stack";
 
   return (
@@ -47,42 +62,15 @@ export default async function Dashboard({
           </div>
 
           <div className="space-y-3 px-3 py-3">
-            <SearchBar defaultValue={activeQuery} category={category ?? ""} />
+            <SearchBar defaultValue={activeQuery} keep={{ ...f, sort: f.sort === "old" ? "old" : undefined }} />
 
-            {!unreachable && categories.length > 0 ? (
-              <div className="flex flex-wrap items-center gap-2">
-                <Link
-                  href="/"
-                  aria-current={!category && !activeQuery ? "true" : undefined}
-                  className={
-                    !category && !activeQuery
-                      ? "font-display hand bg-ink px-2.5 py-1 text-[12px] text-paper"
-                      : BUTTON_SMALL
-                  }
-                >
-                  All
-                </Link>
-                {categories.map((c) => {
-                  const active = category === c && !activeQuery;
-                  return (
-                    <Link
-                      key={c}
-                      href={`/?category=${encodeURIComponent(c)}`}
-                      aria-current={active ? "true" : undefined}
-                      className={
-                        active
-                          ? "font-display hand bg-ink px-2.5 py-1 text-[12px] text-paper"
-                          : BUTTON_SMALL
-                      }
-                    >
-                      {c}
-                    </Link>
-                  );
-                })}
-                <span className="ml-auto">
-                  {!unreachable ? <RefreshButton /> : null}
-                </span>
-              </div>
+            {!unreachable ? (
+              <>
+                <VaultFilters f={f} facets={facets} />
+                <div className="flex justify-end">
+                  <RefreshButton />
+                </div>
+              </>
             ) : null}
 
             {activeQuery && !unreachable ? (
