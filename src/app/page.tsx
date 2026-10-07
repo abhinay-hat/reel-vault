@@ -2,11 +2,14 @@ import Link from "next/link";
 import { filterItems, vaultFacets, type Item, type VaultFacets, type VaultFilter, type VaultStatus } from "@/lib/db";
 import Shell from "@/components/Shell";
 import SearchBar from "@/components/SearchBar";
-import VaultFilters from "@/components/VaultFilters";
+import VaultFilters, { filterHref } from "@/components/VaultFilters";
 import { ItemGrid } from "@/components/ItemGrid";
 import { EmptyState } from "@/components/EmptyState";
 import RefreshButton from "@/components/RefreshButton";
-import { PANEL_HEADER } from "@/components/stack";
+import { BUTTON_SMALL, PANEL_HEADER } from "@/components/stack";
+
+// Rendering every card was the slowness: 2,815 cards = 11 MB of HTML, 14–21 s.
+const PAGE_SIZE = 60;
 
 export default async function Dashboard({
   searchParams,
@@ -26,8 +29,9 @@ export default async function Dashboard({
     sort: sp.sort === "old" ? "old" : "new",
   };
   const { q, category } = f;
+  const page = Math.max(1, Number.parseInt(sp.page ?? "1", 10) || 1);
 
-  let items: Item[] = [];
+  let matched: Item[] = [];
   let facets: VaultFacets = { total: 0, categories: [], tags: [], kinds: [], months: null };
   let total = 0;
   let unreachable = false;
@@ -35,10 +39,19 @@ export default async function Dashboard({
   try {
     facets = await vaultFacets();
     total = facets.total;
-    items = await filterItems(f);
+    matched = await filterItems(f);
   } catch {
     unreachable = true;
   }
+
+  const pages = Math.max(1, Math.ceil(matched.length / PAGE_SIZE));
+  const current = Math.min(page, pages);
+  const items = matched.slice((current - 1) * PAGE_SIZE, current * PAGE_SIZE);
+  const pageHref = (n: number) => {
+    const base = filterHref(f, { sort: f.sort === "old" ? "old" : "" });
+    if (n <= 1) return base;
+    return `${base}${base.includes("?") ? "&" : "?"}page=${n}`;
+  };
 
   const activeQuery = q?.trim() ?? "";
   const filtered = Boolean(category || f.tag || f.kind || f.from || f.to || f.status);
@@ -57,7 +70,7 @@ export default async function Dashboard({
           <div className={PANEL_HEADER}>
             <span>{dealt}</span>
             <span className="tabular">
-              {unreachable ? "—" : `${items.length} of ${total}`}
+              {unreachable ? "—" : `${matched.length} of ${total}`}
             </span>
           </div>
 
@@ -75,9 +88,9 @@ export default async function Dashboard({
 
             {activeQuery && !unreachable ? (
               <p className="text-[13px]">
-                {items.length === 0
+                {matched.length === 0
                   ? `No card matches “${activeQuery}”.`
-                  : `${items.length} ${items.length === 1 ? "card" : "cards"} match “${activeQuery}”.`}{" "}
+                  : `${matched.length} ${matched.length === 1 ? "card" : "cards"} match “${activeQuery}”.`}{" "}
                 <Link
                   href="/"
                   className="font-display underline decoration-2 underline-offset-2 hover:bg-ink hover:text-paper hover:no-underline"
@@ -103,6 +116,13 @@ export default async function Dashboard({
         ) : (
           <div className="dissolve">
             <ItemGrid items={items} />
+            {pages > 1 ? (
+              <nav aria-label="Pages" className="mt-5 flex items-center justify-center gap-3 text-[13px]">
+                {current > 1 ? <Link href={pageHref(current - 1)} className={BUTTON_SMALL}>← Previous</Link> : null}
+                <span className="tabular">{`Page ${current} of ${pages}`}</span>
+                {current < pages ? <Link href={pageHref(current + 1)} className={BUTTON_SMALL}>Next →</Link> : null}
+              </nav>
+            ) : null}
           </div>
         )}
       </div>
