@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import type { Item } from "@/lib/db";
 import Shell from "@/components/Shell";
 import { ItemCard } from "@/components/ItemCard";
@@ -10,7 +11,64 @@ import { BUTTON_PRIMARY, PANEL, PANEL_HEADER } from "@/components/stack";
 
 // Ask the stack in plain words; it answers and deals the cards it found.
 // Contract (Agent B): POST /api/chat { query } -> { answer: string, items: Item[] }.
-type ChatResponse = { answer?: string; items?: Item[] };
+type Source = { n: number; id: string; evidence: string };
+type ChatResponse = { answer?: string; items?: Item[]; sources?: Source[] };
+
+/** **bold** and [n] citations (linked to the cited card); everything else is text. */
+function Inline({ text, idFor }: { text: string; idFor: (n: number) => string | undefined }) {
+  return (
+    <>
+      {text.split(/(\*\*[^*]+\*\*|\[\d+\])/g).map((part, i) => {
+        const cite = /^\[(\d+)\]$/.exec(part);
+        if (cite) {
+          const id = idFor(Number(cite[1]));
+          return id ? (
+            <Link key={i} href={`/item/${id}`} className="font-display underline decoration-2 underline-offset-2 hover:bg-ink hover:text-paper">
+              {part}
+            </Link>
+          ) : (
+            <Fragment key={i}>{part}</Fragment>
+          );
+        }
+        if (part.startsWith("**") && part.endsWith("**")) return <strong key={i}>{part.slice(2, -2)}</strong>;
+        return <Fragment key={i}>{part}</Fragment>;
+      })}
+    </>
+  );
+}
+
+/** The model answers in light markdown: paragraphs and "- " bullets. */
+function Answer({ text, idFor }: { text: string; idFor: (n: number) => string | undefined }) {
+  const blocks = text.split(/\n+/).map((l) => l.trim()).filter(Boolean);
+  return (
+    <div className="space-y-2 px-4 py-3 text-[14px] leading-relaxed">
+      {blocks.map((line, i) =>
+        /^[-*•]\s+/.test(line) ? (
+          <p key={i} className="max-w-[72ch] pl-4 -indent-4">
+            {"– "}
+            <Inline text={line.replace(/^[-*•]\s+/, "")} idFor={idFor} />
+          </p>
+        ) : (
+          <p key={i} className="max-w-[72ch]">
+            <Inline text={line.replace(/^#+\s*/, "")} idFor={idFor} />
+          </p>
+        ),
+      )}
+    </div>
+  );
+}
+
+/** «match» markers from the search become highlights. */
+function Evidence({ text }: { text: string }) {
+  if (!text) return null;
+  return (
+    <p className="mt-1.5 text-[12px] leading-snug">
+      {text.split(/(«[^»]*»)/g).map((p, i) =>
+        p.startsWith("«") ? <mark key={i} className="bg-ink px-0.5 text-paper">{p.slice(1, -1)}</mark> : <Fragment key={i}>{p}</Fragment>,
+      )}
+    </p>
+  );
+}
 type Phase = "idle" | "asking" | "answered" | "error";
 
 export default function ChatPage() {
@@ -19,6 +77,7 @@ export default function ChatPage() {
   const [phase, setPhase] = useState<Phase>("idle");
   const [answer, setAnswer] = useState("");
   const [items, setItems] = useState<Item[]>([]);
+  const [sources, setSources] = useState<Source[]>([]);
   const [error, setError] = useState("");
 
   const busy = phase === "asking";
@@ -29,6 +88,7 @@ export default function ChatPage() {
     setAsked(q);
     setAnswer("");
     setItems([]);
+    setSources([]);
 
     try {
       const res = await fetch("/api/chat", {
@@ -44,6 +104,7 @@ export default function ChatPage() {
       const data: ChatResponse = await res.json();
       setAnswer(typeof data.answer === "string" ? data.answer : "");
       setItems(Array.isArray(data.items) ? data.items : []);
+      setSources(Array.isArray(data.sources) ? data.sources : []);
       setPhase("answered");
     } catch {
       setError("Could not reach the stack. Check that the app is running, then ask again.");
@@ -152,26 +213,28 @@ export default function ChatPage() {
                   <span>Answer</span>
                   <span className="truncate">{asked}</span>
                 </div>
-                <p className="max-w-[68ch] whitespace-pre-wrap px-4 py-3 text-[14px] leading-relaxed">
-                  {answer}
-                </p>
+                <Answer text={answer} idFor={(n) => sources.find((s) => s.n === n)?.id} />
               </div>
             ) : null}
 
             {items.length > 0 ? (
               <section className="space-y-3">
                 <h2 className="font-display tabular border-b-2 border-dotted border-ink pb-1.5 text-[13px] tracking-wide">
-                  {items.length} {items.length === 1 ? "CARD" : "CARDS"} DEALT
+                  {items.length} {items.length === 1 ? "REEL" : "REELS"} FOUND · NUMBERS MATCH THE ANSWER
                 </h2>
                 <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-                  {items.map((item, i) => (
-                    <li
-                      key={item.id}
-                      className="[content-visibility:auto] [contain-intrinsic-size:auto_340px]"
-                    >
-                      <ItemCard item={item} index={i + 1} priority={i < 8} />
-                    </li>
-                  ))}
+                  {items.map((item, i) => {
+                    const src = sources[i];
+                    return (
+                      <li
+                        key={item.id}
+                        className="[content-visibility:auto] [contain-intrinsic-size:auto_340px]"
+                      >
+                        <ItemCard item={item} index={src?.n ?? i + 1} priority={i < 8} />
+                        {src ? <Evidence text={src.evidence} /> : null}
+                      </li>
+                    );
+                  })}
                 </ul>
               </section>
             ) : !answer ? (

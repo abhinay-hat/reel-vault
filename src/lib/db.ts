@@ -645,6 +645,68 @@ export async function searchItems(text: string): Promise<Item[]> {
  * word token, unions the results (deduped by id, first-seen order preserved), and
  * caps the candidate set. Tokens shorter than 2 chars are ignored.
  */
+// ---------------------------------------------------------------- RAG search
+// Full-text index over everything a reel says about itself. External-content
+// FTS5 (no copy of the text) with no triggers: the Python pipeline writes the
+// same file and must not depend on this table, so the index is rebuilt when a
+// cheap content signature changes. ponytail: full rebuild (~sub-second at a
+// few thousand cards); switch to triggers if the vault grows past ~50k.
+const FTS_COLUMNS = "title, summary, tags, entities, caption, transcript, ocr_text";
+let ftsSignature = "";
+
+function ensureFts(d: DatabaseSync): void {
+  d.exec(`create virtual table if not exists items_fts using fts5(${FTS_COLUMNS},
+    content='items', content_rowid='rowid', tokenize='unicode61 remove_diacritics 2')`);
+  const { sig } = d
+    .prepare(
+      `select count(*) || ':' || coalesce(max(rowid), 0) || ':' || coalesce(sum(
+         length(title) + length(coalesce(summary,'')) + length(coalesce(caption,''))
+         + length(coalesce(transcript,'')) + length(coalesce(ocr_text,'')) + length(coalesce(tags,''))), 0) as sig
+       from items`,
+    )
+    .get() as { sig: string };
+  if (sig !== ftsSignature) {
+    d.exec("insert into items_fts(items_fts) values('rebuild')");
+    ftsSignature = sig;
+  }
+}
+
+export interface RagHit {
+  item: Item;
+  /** Where the reel itself talks about the topic: transcript, else on-screen text, else caption. */
+  evidence: string;
+}
+
+/** Ranked full-text search; any term may match. Title and summary weigh most. */
+export async function ragSearch(terms: string[], limit = 10): Promise<RagHit[]> {
+  const clean = [
+    ...new Set(
+      terms
+        .map((t) => t.toLowerCase().replace(/["*^():{}\[\]+-]/g, " ").replace(/\s+/g, " ").trim())
+        .filter((t) => t.length > 1),
+    ),
+  ].slice(0, 12);
+  if (!clean.length) return [];
+  const d = db();
+  ensureFts(d);
+  // Quoted terms are phrases ("chat bot"); OR keeps recall high, bm25 ranks.
+  const match = clean.map((t) => `"${t}"`).join(" OR ");
+  const snip = (col: number) => `snippet(items_fts, ${col}, '«', '»', ' … ', 28)`;
+  const rows = d
+    .prepare(
+      `select items.*, ${snip(5)} as ev_t, ${snip(6)} as ev_o, ${snip(4)} as ev_c
+       from items_fts join items on items.rowid = items_fts.rowid
+       where items_fts match ?
+       order by bm25(items_fts, 6.0, 5.0, 3.0, 3.0, 2.0, 1.5, 1.0)
+       limit ?`,
+    )
+    .all(match, limit) as unknown as (ItemRow & { ev_t: string; ev_o: string; ev_c: string })[];
+  return rows.map((r) => ({
+    item: rowToItem(r),
+    evidence: [r.ev_t, r.ev_o, r.ev_c].find((e) => e && e.includes("«")) ?? "",
+  }));
+}
+
 export async function searchItemsExpanded(text: string, cap = 40): Promise<Item[]> {
   const seen = new Map<string, Item>();
   const terms = [text, ...text.split(/\s+/)]
