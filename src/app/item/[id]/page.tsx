@@ -4,7 +4,7 @@ import ItemActions from "@/components/ItemActions";
 import { EmptyState } from "@/components/EmptyState";
 import { getItem, getCardPosition } from "@/lib/db";
 import CardThumb from "@/components/CardThumb";
-import ClipPlayer from "@/components/ClipPlayer";
+import ClipPlayer, { InstagramEmbed } from "@/components/ClipPlayer";
 import CardNav from "@/components/CardNav";
 import MarkCard from "@/components/MarkCard";
 import { ArrowLeftIcon } from "@/components/icons";
@@ -75,7 +75,14 @@ export default async function ItemDetail({
                 // The reel itself. Controls only: a vault does not autoplay at
                 // you. The first play copies the file onto this machine, so
                 // every play after this one is local.
-                <ClipPlayer src={item.clip} poster={item.poster} held={Boolean(item.video_file)} />
+                <ClipPlayer
+                  src={item.clip}
+                  poster={item.poster}
+                  held={Boolean(item.video_file)}
+                  embed={item.embed}
+                />
+              ) : item.embed ? (
+                <InstagramEmbed src={item.embed} title={item.title || "Instagram reel"} />
               ) : (
                 <CardThumb
                   src={item.poster}

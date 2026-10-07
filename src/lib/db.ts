@@ -10,6 +10,20 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { isExpired } from "@/lib/media";
+
+const IG_PERMALINK = /instagram\.com\/(?:[^/]+\/)?(reel|reels|p|tv)\/([A-Za-z0-9_-]+)/;
+
+function isInstagramPage(u: string): boolean {
+  return /^https?:\/\/(www\.)?instagram\.com\//.test(u);
+}
+
+/** Instagram's embed URL for a reel/post permalink, or null for anything else. */
+export function instagramEmbed(url: string | null | undefined): string | null {
+  const m = url ? IG_PERMALINK.exec(url) : null;
+  if (!m) return null;
+  const kind = m[1] === "p" ? "p" : "reel";
+  return `https://www.instagram.com/${kind}/${m[2]}/embed/`;
+}
 // Type-only: erased at compile time, so the pure ai.ts stays free of any
 // dependency on this module and its node:sqlite import.
 import type { EntityKind } from "@/lib/ai";
@@ -185,6 +199,8 @@ export interface Item {
   poster: string | null;
   /** Resolved local video the UI can play, or null. */
   clip: string | null;
+  /** Instagram's own embed player for this reel/post; never expires. */
+  embed: string | null;
   /** The poster's own caption, re-fetched by shortcode. */
   caption: string | null;
   /** Spoken audio, transcribed locally. */
@@ -248,7 +264,7 @@ export type ContentStatus =
 // optional so ingest can store an item first and cache its media afterwards.
 export type NewItem = Omit<
   Item,
-  | "id" | "created_at" | "poster" | "clip" | "media_file" | "video" | "video_file"
+  | "id" | "created_at" | "poster" | "clip" | "embed" | "media_file" | "video" | "video_file"
   | "caption" | "transcript" | "ocr_text" | "entities" | "actions"
   | "content_status" | "content_error"
   | "keyframe_file" | "duration_s" | "music" | "fetcher" | "enrich_attempts"
@@ -304,11 +320,14 @@ function rowToItem(r: ItemRow): Item {
     // A cached clip plays straight from disk. One that is only a remote URL is
     // still playable — /api/media/clip fetches and keeps it on first watch —
     // but a dead signature is not worth offering a player for.
+    // DM imports store the reel's page URL in `video`, not a file; only a CDN
+    // link is worth a native player, everything else falls back to `embed`.
     clip: r.video_file
       ? `/api/media/${r.video_file}`
-      : r.video && !isExpired(r.video)
+      : r.video && !isInstagramPage(r.video) && !isExpired(r.video)
         ? `/api/media/clip/${r.id}`
         : null,
+    embed: instagramEmbed(r.url),
     caption: r.caption ?? null,
     transcript: r.transcript ?? null,
     ocr_text: r.ocr_text ?? null,
