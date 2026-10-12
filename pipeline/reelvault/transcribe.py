@@ -25,14 +25,9 @@ def _load() -> tuple[str, Any]:
         return _backend, _model
     except Exception:
         pass
-    if os.name == "nt":
-        # pip nvidia-cublas/cudnn wheels ship DLLs under site-packages/nvidia/*/bin.
-        import site
+    from reelvault.cuda import add_nvidia_dlls
 
-        for sp in site.getsitepackages():
-            for bin_dir in Path(sp, "nvidia").glob("*/bin"):
-                os.add_dll_directory(str(bin_dir))
-                os.environ["PATH"] = f"{bin_dir}{os.pathsep}{os.environ['PATH']}"
+    add_nvidia_dlls()
     from faster_whisper import WhisperModel
 
     size = WHISPER_MODEL

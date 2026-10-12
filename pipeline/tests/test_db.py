@@ -125,3 +125,14 @@ def test_queue_newest_original_date_first(tmp_path):
         _insert(con, id=f"r{i}", url=f"https://instagram.com/reel/R{i}/", content_status="pending",
                 created_at=created, added_at="2026-10-07T00:00:00Z")
     assert [r["created_at"] for r in db.queue(con, None)] == ["2026-09-01", "2025-05-01", "2023-01-01"]
+
+
+def test_shards_partition_the_queue():
+    import importlib.util, pathlib
+    spec = importlib.util.spec_from_file_location("extract", pathlib.Path(__file__).parents[1] / "extract.py")
+    ex = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ex)
+    ids = [f"id-{i}" for i in range(200)]
+    shards = [[i for i in ids if ex.in_shard(i, k, 4)] for k in range(4)]
+    assert sorted(sum(shards, [])) == sorted(ids)  # every item in exactly one shard
+    assert all(len(s) > 20 for s in shards)  # roughly even

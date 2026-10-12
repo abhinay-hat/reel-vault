@@ -37,6 +37,10 @@ def _rapid_ocr(path: Path) -> str:
         if _RAPID is None:
             from rapidocr import RapidOCR
 
+            # ponytail: CPU on purpose. Measured on the RTX 5090 box: CUDA gave the
+            # same 0.45 s/frame (small models; pre/post-processing dominates) and
+            # added a 77 s model load per process. Throughput comes from running
+            # extract.py shards in parallel instead.
             _RAPID = RapidOCR()
         r = _RAPID(str(path))
     except Exception:

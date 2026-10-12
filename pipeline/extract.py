@@ -14,6 +14,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import math
 import os
 import signal
@@ -38,6 +39,10 @@ def _handle_sigint(_sig: Any, _frm: Any) -> None:
         sys.exit(130)
     _stop = True
     print("\n  finishing current item, then stopping (Ctrl-C again to force)…")
+
+
+def in_shard(item_id: str, k: int, n: int) -> bool:
+    return int(hashlib.md5(item_id.encode()).hexdigest(), 16) % n == k
 
 
 def load_env_local() -> None:
@@ -97,6 +102,10 @@ def main() -> None:
     parser.add_argument("--retry-failed", action="store_true")
     parser.add_argument("--keep-media", action="store_true")
     parser.add_argument("--batch", type=int, default=15, help="Apify batch size")
+    parser.add_argument(
+        "--shard", default=None, metavar="K/N",
+        help="process only this slice of the queue (e.g. 0/4); run N in parallel",
+    )
     args = parser.parse_args()
 
     signal.signal(signal.SIGINT, _handle_sigint)
@@ -106,7 +115,11 @@ def main() -> None:
         print_stats(con)
         return
 
-    rows = queue(con, args.limit, retry_failed=args.retry_failed)
+    rows = queue(con, None if args.shard else args.limit, retry_failed=args.retry_failed)
+    if args.shard:
+        # Stable split by id, so parallel runs never touch the same item.
+        k, n = (int(x) for x in args.shard.split("/"))
+        rows = [r for r in rows if in_shard(r["id"], k, n)][: args.limit]
     batch_size = max(1, args.batch)
     n_batches = math.ceil(len(rows) / batch_size) if rows else 0
     est = estimate_batch_usd(min(batch_size, len(rows))) * max(n_batches, 0) if rows else 0.0
