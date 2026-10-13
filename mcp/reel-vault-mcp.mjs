@@ -131,36 +131,85 @@ const ITEM_COLS = [
 
 // ----------------------------- tools -----------------------------
 
+const STOPWORDS = new Set((
+  "a an the and or of to for in on at by with from into about is are was were be " +
+  "it its this that these those which who what when where how can could will would " +
+  "should do does did me my i you your we our us any some all get got there here " +
+  "reel reels post posts saved save"
+).split(" "));
+
+/**
+ * Split a query into the words worth matching on their own.
+ *
+ * Matching the query as one substring meant "claude video" found nothing even
+ * when an item said "Claude" and "videos" — the words are rarely adjacent.
+ * Plurals are trimmed to their stem so "images" also hits "image".
+ */
+function queryTerms(query) {
+  const words = String(query ?? "").toLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}.+#-]*/gu) ?? [];
+  const terms = new Set();
+  for (let w of words) {
+    w = w.replace(/[.-]+$/, "");
+    if (!w || STOPWORDS.has(w)) continue;
+    if (w.length > 4 && /(ch|sh|x|ss)es$/.test(w)) w = w.slice(0, -2);
+    else if (w.length > 3 && w.endsWith("s") && !w.endsWith("ss")) w = w.slice(0, -1);
+    terms.add(w);
+  }
+  return [...terms];
+}
+
 function searchVault({ query, limit = 12, category }) {
   const q = String(query ?? "").trim();
   if (!q) return { results: [], note: "empty query" };
-  const like = `%${q.toLowerCase()}%`;
+  let terms = queryTerms(q);
+  // A query made only of stopwords ("how to") still deserves a literal try.
+  if (terms.length === 0) terms = [q.toLowerCase()];
+  terms = terms.slice(0, 12);
 
-  // Ranked by where the term appears, not just whether it does. A reel whose
-  // title or summary is about the topic beats one that mentions it in passing
-  // halfway through a transcript.
+  // Each term is ranked by where it appears, not just whether it does: a reel
+  // whose title or summary is about the topic beats one that mentions it in
+  // passing halfway through a transcript. Items matching more of the terms
+  // rank first, so a partial match never outranks a complete one.
+  const termScore = (p) => `(
+      (case when lower(coalesce(title,''))  like ${p} then 100 else 0 end) +
+      (case when lower(coalesce(summary,''))like ${p} then 60  else 0 end) +
+      (case when lower(${arr("entities")})  like ${p} then 50  else 0 end) +
+      (case when lower(coalesce(tags,''))   like ${p} then 40  else 0 end) +
+      (case when lower(coalesce(category,''))like ${p} then 30 else 0 end) +
+      (case when lower(${txt("caption")})   like ${p} then 20  else 0 end) +
+      (case when lower(${txt("ocr_text")})  like ${p} then 15  else 0 end) +
+      (case when lower(${txt("transcript")})like ${p} then 10  else 0 end) +
+      (case when lower(coalesce(notes,''))  like ${p} then 10  else 0 end))`;
+  const args = terms.map((t) => `%${t.replace(/[\\%_]/g, (c) => "\\" + c)}%`);
+  const cols = args.map((_, i) => `${termScore(`?${i + 1} escape '\\'`)} as t${i}`);
+  const hits = args.map((_, i) => `(t${i} > 0)`).join(" + ");
+  const score = args.map((_, i) => `t${i}`).join(" + ");
+  const limitP = `?${args.length + 1}`;
+  const categoryP = `?${args.length + 2}`;
+
   const sql = `
-    select ${ITEM_COLS},
-      (case when lower(title)               like ?1 then 100 else 0 end) +
-      (case when lower(coalesce(summary,''))like ?1 then 60  else 0 end) +
-      (case when lower(${arr("entities")})  like ?1 then 50  else 0 end) +
-      (case when lower(tags)                like ?1 then 40  else 0 end) +
-      (case when lower(category)            like ?1 then 30  else 0 end) +
-      (case when lower(${txt("caption")})   like ?1 then 20  else 0 end) +
-      (case when lower(${txt("ocr_text")})  like ?1 then 15  else 0 end) +
-      (case when lower(${txt("transcript")})like ?1 then 10  else 0 end) +
-      (case when lower(coalesce(notes,''))  like ?1 then 10  else 0 end) as score
-    from items
-    where score > 0 ${category ? "and lower(category) = lower(?3)" : ""}
-    order by score desc, created_at desc
-    limit ?2`;
-  const args = category ? [like, Math.min(Number(limit) || 12, 50), category]
-                        : [like, Math.min(Number(limit) || 12, 50)];
-  const rows = db.prepare(sql).all(...args);
+    select * from (
+      select ${ITEM_COLS}, ${cols.join(", ")}
+      from items
+      ${category ? `where lower(category) = lower(${categoryP})` : ""}
+    )
+    where (${hits}) > 0
+    order by (${hits}) desc, (${score}) desc, created_at desc
+    limit ${limitP}`;
+  const rows = db.prepare(sql).all(
+    ...args, Math.min(Number(limit) || 12, 50), ...(category ? [category] : []),
+  );
   return {
     query: q,
+    terms,
     count: rows.length,
-    results: rows.map((r) => shape(r)),
+    results: rows.map((r) => {
+      const matched = terms.filter((_, i) => r[`t${i}`] > 0);
+      return {
+        ...shape(r),
+        ...(matched.length < terms.length && { matched_terms: matched }),
+      };
+    }),
     ...(rows.length === 0 && { note: unenrichedHint() }),
   };
 }
