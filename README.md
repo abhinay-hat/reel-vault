@@ -90,7 +90,7 @@ Then log in and sync from **/connect**.
 python pipeline/extract.py --run    # captions, keyframes, OCR, transcripts
 ```
 
-Heavy runs work well on a GPU box (`pipeline/run-windows.bat` uses faster-whisper on CUDA).
+Heavy runs work well on a GPU box (`pipeline/run-windows.bat` uses faster-whisper on CUDA). Stages, fetchers and statuses are explained in [docs/KNOWLEDGE-BASE.md](docs/KNOWLEDGE-BASE.md).
 
 ### 3 · Enrich with a local LLM
 
