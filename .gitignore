@@ -68,3 +68,6 @@ pipeline/**/__pycache__/
 # vite
 /dist/
 /dist-server/
+
+# browser automation snapshots and logs
+.playwright-cli/
