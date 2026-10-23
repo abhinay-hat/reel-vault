@@ -45,7 +45,25 @@ if (!existsSync(DB_PATH)) {
   process.exit(1);
 }
 
-const db = new sqlite.DatabaseSync(DB_PATH, { readOnly: true });
+let db = new sqlite.DatabaseSync(DB_PATH, { readOnly: true });
+
+/**
+ * This process lives as long as the Claude session, often for days. If the
+ * vault file is replaced underneath it (a restore from backup, a copy from the
+ * Windows box), the open connection keeps stale pages and every query fails
+ * with "database disk image is malformed" even though the file is fine.
+ * Reopening picks up the new file.
+ */
+function reopen() {
+  try {
+    db.close();
+  } catch {}
+  db = new sqlite.DatabaseSync(DB_PATH, { readOnly: true });
+  COLUMNS = readColumns();
+  HAS_CONTENT = COLUMNS.has("caption") && COLUMNS.has("entities");
+}
+
+const isStale = (err) => /malformed|not a database|SQLITE_CORRUPT|SQLITE_NOTADB|no such table/i.test(String(err?.message ?? err));
 
 /**
  * The content columns are added by a migration that runs when the Next app or
@@ -57,8 +75,9 @@ const db = new sqlite.DatabaseSync(DB_PATH, { readOnly: true });
  * Missing columns are substituted with SQL literals, so queries stay valid and
  * the tools degrade to "links only" instead of breaking.
  */
-const COLUMNS = new Set(db.prepare("pragma table_info(items)").all().map((r) => r.name));
-const HAS_CONTENT = COLUMNS.has("caption") && COLUMNS.has("entities");
+const readColumns = () => new Set(db.prepare("pragma table_info(items)").all().map((r) => r.name));
+let COLUMNS = readColumns();
+let HAS_CONTENT = COLUMNS.has("caption") && COLUMNS.has("entities");
 
 /** `col("caption")` -> `caption`, or `null` when that column does not exist yet. */
 const col = (name, missing = "null") => (COLUMNS.has(name) ? name : missing);
@@ -462,7 +481,14 @@ function handle(req) {
         if (!tool) {
           return send({ id, error: { code: -32602, message: `unknown tool: ${params?.name}` } });
         }
-        const result = tool.handler(params?.arguments ?? {});
+        let result;
+        try {
+          result = tool.handler(params?.arguments ?? {});
+        } catch (err) {
+          if (!isStale(err)) throw err;
+          reopen();
+          result = tool.handler(params?.arguments ?? {});
+        }
         return send({
           id,
           result: { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] },
