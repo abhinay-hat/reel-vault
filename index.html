@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en" class="h-full">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#ffffff" />
+    <meta name="color-scheme" content="light" />
+    <meta name="description" content="A private shoebox of everything you saved." />
+    <title>Reel Vault</title>
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="icon" href="/icon-192.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@100..900&family=Pixelify+Sans:wght@400..700&display=swap"
+    />
+    <style>
+      /* Were next/font CSS variables; globals.css maps them onto the theme. */
+      :root {
+        --font-pixel: "Pixelify Sans";
+        --font-geist-mono: "Geist Mono";
+      }
+    </style>
+  </head>
+  <body class="min-h-full flex flex-col bg-paper text-ink">
+    <!--
+THESIS: The hoard is a shoebox of cards you can read and write on, and a card
+nobody has described looks blank. Refuses the search-bar-over-masonry-grid that
+every saved-content app ships.
+OWN-WORLD: 1-bit HyperCard. Black ink, white paper, a five-step Bayer stipple
+ramp instead of grays, hand-drawn SVG borders, Chicago pixel chrome over Geneva
+monospace records. No colour in the chrome; the reel thumbnail is pasted on at
+full colour. The only state idiom is inversion to solid black.
+STORY: The owner sees how much of the vault is actually described, finds one
+half-remembered reel, and writes on the card that held it.
+FIRST VIEWPORT: Menu bar, then a state line reading cards / described / sync age
+with the undescribed remainder drawn as empty slots. Find field over the stack.
+Below, the deal: hard-edged cards, described ones carrying a pasted photo,
+undescribed ones showing their ruled, empty writing area.
+FORM: HyperCard Shoebox Stack. Dealt challenger that beat assigned candidate 6
+of 7 (Card Catalog) on both audience identification and product clarity.
+Seed ffaa501a.
+FINISH: unreviewed and undocumented is unfinished; this build ends with the
+finish review, the verdict, DESIGN.md, and every shipping raster carrying its
+provenance.
+-->
+    <div id="root" class="min-h-full flex flex-col"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

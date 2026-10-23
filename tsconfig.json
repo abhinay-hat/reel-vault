@@ -1,0 +1,51 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "esnext"
+    ],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "react-jsx",
+    "paths": {
+      "@/*": [
+        "./src/*"
+      ],
+      "next/link": [
+        "./src/shims/next-link.tsx"
+      ],
+      "next/navigation": [
+        "./src/shims/next-navigation.ts"
+      ],
+      "next/server": [
+        "./src/shims/next-server.ts"
+      ]
+    },
+    "types": [
+      "vite/client",
+      "node"
+    ]
+  },
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "server/**/*.ts",
+    "vite.config.ts",
+    "vitest.config.ts",
+    "mcp/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "dist-server"
+  ]
+}

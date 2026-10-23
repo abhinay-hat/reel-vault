@@ -1,0 +1,187 @@
+@import "tailwindcss";
+
+/*
+  Reel Vault — "shoebox stack"
+
+  A 1-bit HyperCard stack. Black ink on white paper, five stipple levels, and
+  nothing else: no color in the chrome, no shadow, no gradient. Depth comes from
+  hairline seams and from inversion — the active thing is filled solid black.
+
+  The one exception is the reel thumbnail, which is pasted onto its card at full
+  colour the way a photograph is pasted into a stack. Chrome is 1-bit; the
+  content is not. That conflict is resolved in favour of the content because the
+  thumbnail is the only retrieval signal this vault has at full coverage.
+
+  Absence is drawn, never omitted: a card nobody has described shows its ruled,
+  empty writing area rather than filler text.
+*/
+
+:root {
+  color-scheme: light;
+
+  --ink: #000000;
+  --paper: #ffffff;
+
+  /* The stipple ramp stands in for every gray. There are no other values. */
+  --stipple-1: 12%;
+  --stipple-2: 25%;
+  --stipple-3: 50%;
+  --stipple-4: 75%;
+  --stipple-5: 90%;
+}
+
+@theme inline {
+  --color-ink: var(--ink);
+  --color-paper: var(--paper);
+
+  --font-display: var(--font-pixel);
+  --font-sans: var(--font-geist-mono);
+  --font-mono: var(--font-geist-mono);
+}
+
+/*
+  Ordered dither, 4x4 Bayer. Real stipple, not opacity: at any zoom the dots
+  stay hard-edged square pixels, which is what makes the surface read as 1-bit
+  rather than as gray paint.
+*/
+.stipple-1,
+.stipple-2,
+.stipple-3,
+.stipple-4,
+.stipple-5 {
+  background-color: var(--paper);
+  background-size: 4px 4px;
+  background-repeat: repeat;
+  image-rendering: pixelated;
+}
+
+.stipple-1 {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='4' height='4' shape-rendering='crispEdges'><rect x='0' y='0' width='1' height='1' fill='black'/><rect x='2' y='2' width='1' height='1' fill='black'/></svg>");
+}
+.stipple-2 {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='4' height='4' shape-rendering='crispEdges'><rect x='0' y='0' width='1' height='1' fill='black'/><rect x='2' y='2' width='1' height='1' fill='black'/><rect x='2' y='0' width='1' height='1' fill='black'/><rect x='0' y='2' width='1' height='1' fill='black'/></svg>");
+}
+.stipple-3 {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='4' height='4' shape-rendering='crispEdges'><rect x='0' y='0' width='1' height='1' fill='black'/><rect x='2' y='0' width='1' height='1' fill='black'/><rect x='1' y='1' width='1' height='1' fill='black'/><rect x='3' y='1' width='1' height='1' fill='black'/><rect x='0' y='2' width='1' height='1' fill='black'/><rect x='2' y='2' width='1' height='1' fill='black'/><rect x='1' y='3' width='1' height='1' fill='black'/><rect x='3' y='3' width='1' height='1' fill='black'/></svg>");
+}
+.stipple-4 {
+  background-color: var(--ink);
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='4' height='4' shape-rendering='crispEdges'><rect x='1' y='0' width='1' height='1' fill='white'/><rect x='3' y='2' width='1' height='1' fill='white'/><rect x='3' y='0' width='1' height='1' fill='white'/><rect x='1' y='2' width='1' height='1' fill='white'/></svg>");
+}
+.stipple-5 {
+  background-color: var(--ink);
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='4' height='4' shape-rendering='crispEdges'><rect x='1' y='1' width='1' height='1' fill='white'/><rect x='3' y='3' width='1' height='1' fill='white'/></svg>");
+}
+
+/*
+  Hand-drawn border. The stack's frames were drawn with a mouse in 1987, so a
+  geometrically perfect rectangle is the wrong shape: this is a wobbling stroke
+  rendered as a real SVG border-image, not a rounded-corner approximation.
+*/
+.hand {
+  border: 3px solid transparent;
+  border-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='40' height='40' viewBox='0 0 40 40'><path d='M4.4 3.2 Q 12 5.2 20 3.0 Q 28 5.4 36.8 3.4 Q 34.6 12 37.0 20 Q 34.8 28 36.6 36.8 Q 28 34.6 20 37.0 Q 12 34.8 3.2 36.6 Q 5.4 28 3.0 20 Q 5.2 12 4.4 3.2 Z' fill='none' stroke='black' stroke-width='2.6' stroke-linejoin='round' stroke-linecap='round'/></svg>") 9 stretch;
+}
+
+.hand-thick {
+  border: 4px solid transparent;
+  border-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='40' height='40' viewBox='0 0 40 40'><path d='M4 4.6 Q 20 2.8 36 4 Q 37.4 20 36.4 36 Q 20 37.4 4.2 36.2 Q 2.8 20 4 4.6 Z' fill='none' stroke='black' stroke-width='4' stroke-linejoin='round'/></svg>") 9 stretch;
+}
+
+body {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 15px;
+  line-height: 1.55;
+  background: var(--paper);
+  color: var(--ink);
+  -webkit-font-smoothing: none;
+}
+
+/* Chicago's role: menus, buttons, card titles, the wordmark. Never body copy. */
+.font-display {
+  font-family: var(--font-pixel), ui-monospace, monospace;
+  letter-spacing: 0.01em;
+}
+
+h1,
+h2,
+h3 {
+  text-wrap: balance;
+  scroll-margin-top: 6rem;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+  Browser surfaces belong to the stack too. A default blue caret or a rounded
+  system scrollbar would be the one place the 1-bit world leaked.
+*/
+::selection {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+* {
+  caret-color: var(--ink);
+}
+
+:focus-visible {
+  outline: 3px solid var(--ink);
+  outline-offset: 2px;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--ink) var(--paper);
+}
+
+::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+::-webkit-scrollbar-track {
+  background-color: var(--paper);
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='4' height='4' shape-rendering='crispEdges'><rect x='0' y='0' width='1' height='1' fill='black'/><rect x='2' y='2' width='1' height='1' fill='black'/></svg>");
+  background-size: 4px 4px;
+  border-left: 2px solid var(--ink);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--ink);
+  border: 2px solid var(--paper);
+}
+
+/*
+  The stack's one authored motion: a card does not fade, it dissolves through
+  the dither, the way a HyperCard visual effect resolved one pixel pattern into
+  another. Used on card entry only, never scattered across hovers.
+*/
+@keyframes dissolve-in {
+  from {
+    opacity: 0;
+    -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='4' height='4' shape-rendering='crispEdges'><rect x='0' y='0' width='1' height='1' fill='black'/></svg>");
+    mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='4' height='4' shape-rendering='crispEdges'><rect x='0' y='0' width='1' height='1' fill='black'/></svg>");
+    -webkit-mask-size: 4px 4px;
+    mask-size: 4px 4px;
+  }
+  to {
+    opacity: 1;
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+}
+
+.dissolve {
+  animation: dissolve-in 260ms steps(5, end) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
