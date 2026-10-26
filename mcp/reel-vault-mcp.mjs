@@ -216,7 +216,7 @@ function searchVault({ query, limit = 12, category }) {
     order by (${hits}) desc, (${score}) desc, created_at desc
     limit ${limitP}`;
   const rows = db.prepare(sql).all(
-    ...args, Math.min(Number(limit) || 12, 50), ...(category ? [category] : []),
+    ...args, Math.min(Math.max(1, Number(limit) || 12), 50), ...(category ? [category] : []),
   );
   return {
     query: q,
@@ -295,7 +295,7 @@ function listEntities({ kind, limit = 100 }) {
   return {
     ...(kind && { kind }),
     count: all.length,
-    entities: all.slice(0, Math.min(Number(limit) || 100, 500)),
+    entities: all.slice(0, Math.min(Math.max(1, Number(limit) || 100), 500)),
     ...(all.length === 0 && {
       note: "No entities extracted yet — run pipeline/extract.py then POST /api/enrich-pending.",
     }),
@@ -315,13 +315,13 @@ function findActions({ topic, limit = 40 }) {
       out.push({ action: a, from: r.title, category: r.category, item_id: r.id, url: r.url });
     }
   }
-  return { count: out.length, actions: out.slice(0, Math.min(Number(limit) || 40, 200)) };
+  return { count: out.length, actions: out.slice(0, Math.min(Math.max(1, Number(limit) || 40), 200)) };
 }
 
 function recentItems({ limit = 15 }) {
   const rows = db.prepare(
     `select ${ITEM_COLS} from items order by added_at desc, rowid desc limit ?`,
-  ).all(Math.min(Number(limit) || 15, 50));
+  ).all(Math.min(Math.max(1, Number(limit) || 15), 50));
   return { count: rows.length, items: rows.map((r) => shape(r)) };
 }
 

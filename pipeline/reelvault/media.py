@@ -21,6 +21,7 @@ MAX_LATER_FRAMES = 10
 DEDUPE_HASH_DIST = 9
 MAX_UNIQUE_FRAMES = 9
 UA = "Mozilla/5.0"
+MAX_DOWNLOAD_BYTES = 250 * 1024 * 1024
 
 
 def download(url: str, dest: Path) -> Optional[Path]:
@@ -37,8 +38,14 @@ def download(url: str, dest: Path) -> Optional[Path]:
             headers={"User-Agent": UA},
         ) as r:
             r.raise_for_status()
+            total = 0
             with open(tmp, "wb") as f:
                 for chunk in r.iter_content(1 << 16):
+                    if not chunk:
+                        continue
+                    total += len(chunk)
+                    if total > MAX_DOWNLOAD_BYTES:
+                        raise ValueError("download_too_large")
                     f.write(chunk)
         tmp.rename(dest)
         return dest

@@ -467,7 +467,7 @@ export async function filterItems(f: VaultFilter): Promise<Item[]> {
   if (f.kind) { where.push("entities like ?"); params.push(`%"kind":${JSON.stringify(f.kind)}%`); }
   if (f.from) { where.push("coalesce(created_at, added_at) >= ?"); params.push(`${f.from}-01`); }
   if (f.to) { where.push("coalesce(created_at, added_at) < ?"); params.push(nextMonth(f.to)); }
-  if (f.status && STATUS_SQL[f.status]) where.push(STATUS_SQL[f.status]);
+  if (f.status && Object.hasOwn(STATUS_SQL, f.status)) where.push(STATUS_SQL[f.status]);
   const order = f.sort === "old" ? "coalesce(created_at, added_at) asc, rowid asc" : STACK_ORDER;
   const sql = `select * from items ${where.length ? `where ${where.join(" and ")}` : ""} order by ${order}`;
   return (db().prepare(sql).all(...params) as unknown as ItemRow[]).map(rowToItem);

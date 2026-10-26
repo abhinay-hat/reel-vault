@@ -2,7 +2,7 @@
 Reel Vault — Instagram private-API sidecar (instagrapi).
 
 Local-only FastAPI service. Binds to 127.0.0.1 so the session/credential never
-leaves this machine. The Next.js app talks to it over http://127.0.0.1:8765.
+leaves this machine. The Vite + Hono app talks to it over http://127.0.0.1:8765.
 
 WARNING: instagrapi uses Instagram's PRIVATE mobile API. This violates Instagram's
 Terms of Service and can get the logged-in account checkpointed, locked, or banned.
@@ -10,16 +10,20 @@ Use only with your own account, at your own risk. The sessionid is a full creden
 """
 from __future__ import annotations
 
+import ipaddress
 import os
 import re
+import socket
 import threading
 import traceback
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import urlparse
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from instagrapi import Client
 from instagrapi.exceptions import (
@@ -39,6 +43,72 @@ except Exception:  # pragma: no cover - older versions
 
 SESSION_FILE = Path(os.environ.get("IG_SESSION_FILE", "./ig_session.json"))
 URL_RE = re.compile(r"https?://[^\s\"'<>]+")
+_ALLOWED_HOSTS = {"127.0.0.1", "localhost", "::1"}
+
+
+def _host_ok(host_header: str | None) -> bool:
+    if not host_header:
+        return False
+    host = host_header.strip()
+    if host.startswith("["):
+        end = host.find("]")
+        name = host[1:end] if end > 0 else host
+    else:
+        name = host.rsplit(":", 1)[0]
+    return name.lower() in _ALLOWED_HOSTS
+
+
+def _is_private_ip(ip: str) -> bool:
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return True
+    return (
+        addr.is_private
+        or addr.is_loopback
+        or addr.is_link_local
+        or addr.is_reserved
+        or addr.is_multicast
+        or addr.is_unspecified
+    )
+
+
+def _public_http_url(url: str) -> bool:
+    """Reject file paths, file://, and http(s) URLs that resolve to private IPs."""
+    if not url or url.startswith("/") or url.startswith("\\") or "://" not in url:
+        return False
+    try:
+        u = urlparse(url)
+    except Exception:
+        return False
+    if u.scheme not in ("http", "https"):
+        return False
+    if u.username or u.password or not u.hostname:
+        return False
+    host = u.hostname
+    try:
+        # Literal IP?
+        if _is_private_ip(host):
+            return False
+    except Exception:
+        pass
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except socket.gaierror:
+        return False
+    for info in infos:
+        ip = info[4][0]
+        if _is_private_ip(ip):
+            return False
+    return True
+
+
+def _chmod_session() -> None:
+    try:
+        if SESSION_FILE.exists():
+            os.chmod(SESSION_FILE, 0o600)
+    except OSError:
+        pass
 
 # Risk throttles (instagrapi best practices: low frequency, hard cooldowns).
 MIN_GATHER_INTERVAL_S = float(os.environ.get("IG_MIN_GATHER_INTERVAL_HOURS", "20")) * 3600
@@ -49,6 +119,15 @@ COOLDOWN_S = float(os.environ.get("IG_COOLDOWN_HOURS", "6")) * 3600
 MEDIA_MIN_INTERVAL_S = float(os.environ.get("IG_MEDIA_MIN_INTERVAL_SECONDS", "25"))
 
 app = FastAPI(title="reel-vault-ig-bridge")
+
+
+@app.middleware("http")
+async def _reject_bad_host(request: Request, call_next):  # type: ignore[no-untyped-def]
+    # DNS-rebinding defense: only answer Host headers for loopback names.
+    if not _host_ok(request.headers.get("host")):
+        return JSONResponse({"error": "bad_host"}, status_code=400)
+    return await call_next(request)
+
 
 # Single connected client + a tiny in-memory job table for long gathers.
 _state: dict[str, Any] = {
@@ -286,6 +365,7 @@ def health() -> dict[str, Any]:
 
 def _finish(cl: Client) -> dict[str, Any]:
     cl.dump_settings(SESSION_FILE)
+    _chmod_session()
     info = cl.account_info()
     _state["client"] = cl
     _state["username"] = info.username
@@ -416,7 +496,7 @@ def login(req: LoginReq) -> dict[str, Any]:
             _state.pop("pending", None)
             return {"ok": False, "error": "challenge_required",
                     "detail": "Instagram blocked this password login with a security challenge it won't let a script solve. Use the session id method below instead, or approve the login inside the Instagram app first and retry."}
-        return {"ok": False, "error": "login_failed", "detail": msg}
+        return {"ok": False, "error": "login_failed", "detail": "Login failed."}
 
 
 @app.get("/account-info")
@@ -488,15 +568,15 @@ def media_by_shortcode(shortcode: str) -> dict[str, Any]:
                 "reason": f"{type(e).__name__}"}
     except (ChallengeRequired, ChallengeUnknownStep) as e:
         _enter_cooldown(f"challenge during media lookup: {type(e).__name__}")
-        return {"error": "challenge", "detail": f"{type(e).__name__}: {e}"}
+        return {"error": "challenge", "detail": "Instagram raised a security challenge."}
     except Exception as e:  # noqa: BLE001
         # A deleted or private reel is a permanent condition, not a transient
         # failure — flagged separately so the caller stops paying rate limit to
         # re-request links that will never resolve.
         text = f"{type(e).__name__}: {e}".lower()
         if "not found" in text or "media_not_found" in text or "unavailable" in text:
-            return {"error": "unavailable", "detail": f"{type(e).__name__}: {e}"}
-        return {"error": f"{type(e).__name__}", "detail": str(e)}
+            return {"error": "unavailable", "detail": "Media unavailable."}
+        return {"error": "lookup_failed", "detail": "Media lookup failed."}
 
 
 @app.get("/collections")
@@ -548,7 +628,7 @@ def _extract_share(m: Any) -> tuple[str, Optional[str], Optional[str], Optional[
     `media` carries what a shared reel actually needs to be watchable later:
     the video file, a thumbnail, and the ORIGINAL poster's handle (not the
     person who forwarded it). Dropping these is why every DM-shared reel in
-    the vault was an unplayable link with "Shared by 7456093337" as its title.
+    the vault was an unplayable link with "Shared by 1000000000" as its title.
     """
     for attr in ("media_share", "clip"):
         shared = getattr(m, attr, None)
@@ -783,12 +863,15 @@ class ConvertReq(BaseModel):
 
 @app.post("/convert")
 def convert(req: ConvertReq) -> dict[str, Any]:
-    """Convert a URL (article, document, image, etc.) to Markdown via markitdown.
+    """Convert a public http(s) URL to Markdown via markitdown.
 
     Uses Microsoft markitdown (https://github.com/microsoft/markitdown).
     markitdown is imported lazily so the service boots even if it is missing.
     Markdown is truncated to ~8 000 chars to keep response payloads sane.
+    Local paths and private IPs are rejected (SSRF / file-read defense).
     """
+    if not _public_http_url(req.url):
+        return {"ok": False, "error": "url_not_allowed"}
     try:
         from markitdown import MarkItDown  # type: ignore[import]
     except ImportError:
@@ -800,5 +883,5 @@ def convert(req: ConvertReq) -> dict[str, Any]:
         if len(text) > 8000:
             text = text[:8000]
         return {"ok": True, "markdown": text}
-    except Exception as e:  # noqa: BLE001
-        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+    except Exception:  # noqa: BLE001
+        return {"ok": False, "error": "convert_failed"}

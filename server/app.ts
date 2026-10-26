@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { getCookie } from "hono/cookie";
 import { NextRequest } from "@/shims/next-server";
 import { PASSCODE_COOKIE, isValidAuthCookie } from "@/lib/passcode";
+import { securityMiddleware } from "@/lib/http-guards";
 import * as db from "@/lib/db";
 import type { VaultFilter, VaultStatus } from "@/lib/db";
 
@@ -19,20 +20,33 @@ function toPath(file: string): string {
     .replace(/\[([^\]]+)\]/g, ":$1");
 }
 
+// Cap upload bodies (export ZIPs). Larger payloads are rejected before unzip.
+const MAX_BODY_BYTES = 80 * 1024 * 1024;
+
 // @hono/node-server passes a lightweight request object, not an undici Request,
 // so `new Request(raw)` throws. Rebuild it from its parts. The body is buffered:
 // re-streaming it crashed undici ("ReadableStream is already closed"), and
 // bodies here are small JSON or one export ZIP. ponytail: stream if uploads get big.
 async function toNextRequest(raw: Request): Promise<NextRequest> {
   const init: RequestInit = { method: raw.method, headers: raw.headers, signal: raw.signal };
-  if (raw.method !== "GET" && raw.method !== "HEAD") init.body = await raw.arrayBuffer();
+  if (raw.method !== "GET" && raw.method !== "HEAD") {
+    const buf = await raw.arrayBuffer();
+    if (buf.byteLength > MAX_BODY_BYTES) {
+      throw Object.assign(new Error("body_too_large"), { status: 413 });
+    }
+    init.body = buf;
+  }
   return new NextRequest(raw.url, init);
 }
 
 const app = new Hono();
 
+app.use("*", securityMiddleware);
+
 // The passcode gate (was src/middleware.ts). Pages are a static SPA now, so the
 // gate guards the data: every /api call except login and the bearer-token share.
+// When HOST is a non-loopback bind, APP_PASSCODE is required at process start
+// (see server/index.ts); unset still disables the gate on loopback-only binds.
 app.use("/api/*", async (c, next) => {
   if (!process.env.APP_PASSCODE) return next();
   const p = c.req.path;
@@ -111,9 +125,16 @@ for (const { path, mod } of routes) {
   for (const method of ["GET", "POST", "PUT", "PATCH", "DELETE"] as const) {
     const handler = mod[method];
     if (!handler) continue;
-    app.on(method, path, async (c) =>
-      handler(await toNextRequest(c.req.raw), { params: Promise.resolve(c.req.param()) }),
-    );
+    app.on(method, path, async (c) => {
+      try {
+        return await handler(await toNextRequest(c.req.raw), { params: Promise.resolve(c.req.param()) });
+      } catch (e) {
+        if (e && typeof e === "object" && (e as { status?: number }).status === 413) {
+          return c.json({ error: "body_too_large" }, 413);
+        }
+        throw e;
+      }
+    });
   }
 }
 

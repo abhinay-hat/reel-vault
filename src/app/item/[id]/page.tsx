@@ -130,9 +130,11 @@ export default function ItemDetail() {
             )}
 
             <div className="border-t-2 border-dotted border-ink pt-4">
-              <a href={item.url} target="_blank" rel="noreferrer" className={BUTTON}>
-                Open the original
-              </a>
+              {/^https?:\/\//i.test(item.url) && (
+                <a href={item.url} target="_blank" rel="noreferrer" className={BUTTON}>
+                  Open the original
+                </a>
+              )}
             </div>
           </div>
         </article>

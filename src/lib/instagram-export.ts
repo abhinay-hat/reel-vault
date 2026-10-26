@@ -40,17 +40,17 @@ function firstArray(data: Record<string, unknown>, key: string): ExportEntry[] {
   return Array.isArray(any) ? any : [];
 }
 
+function isHttpHref(href: unknown): href is string {
+  return typeof href === "string" && /^https?:\/\//i.test(href);
+}
+
 function entryHref(entry: ExportEntry): string | undefined {
   const fromMap = entry.string_map_data
-    ? Object.values(entry.string_map_data).find(
-        (v) => typeof v?.href === "string" && v.href.startsWith("http"),
-      )?.href
+    ? Object.values(entry.string_map_data).find((v) => isHttpHref(v?.href))?.href
     : undefined;
-  if (typeof fromMap === "string") return fromMap;
-  const fromList = entry.string_list_data?.find(
-    (v) => typeof v?.href === "string" && v.href.startsWith("http"),
-  )?.href;
-  return typeof fromList === "string" ? fromList : undefined;
+  if (isHttpHref(fromMap)) return fromMap;
+  const fromList = entry.string_list_data?.find((v) => isHttpHref(v?.href))?.href;
+  return isHttpHref(fromList) ? fromList : undefined;
 }
 
 export function parseSavedPosts(rawJson: string): SavedPost[] {
@@ -100,7 +100,7 @@ export function parseInbox(rawJson: string): ParsedThread | null {
       sender: str(m.sender_name) ?? "unknown",
       content: str(m.content),
       sentAt: typeof m.timestamp_ms === "number" ? m.timestamp_ms : 0,
-      sharedUrl: m.share?.link && m.share.link.startsWith("http") ? m.share.link : undefined,
+      sharedUrl: isHttpHref(m.share?.link) ? m.share.link : undefined,
     }));
     return {
       threadKey: typeof d.thread_path === "string" ? d.thread_path : (str(d.title) ?? "thread"),

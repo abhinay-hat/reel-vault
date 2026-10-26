@@ -40,8 +40,13 @@ export default defineConfig(({ mode }) => {
         "next/server": path.join(src, "shims/next-server.ts"),
       },
     },
-    server: { port: 3210, host: true, strictPort: true },
-    preview: { port: 3210, host: true },
+    // Default loopback. Set HOST (and APP_PASSCODE) to expose on the LAN.
+    server: {
+      port: 3210,
+      host: process.env.HOST || "127.0.0.1",
+      strictPort: true,
+    },
+    preview: { port: 3210, host: process.env.HOST || "127.0.0.1" },
     // node:sqlite is loaded at runtime via process.getBuiltinModule; keep it out of bundling.
     ssr: { external: ["node:sqlite"] },
     build: { outDir: "dist" },

@@ -22,6 +22,7 @@ function hostOf(url: string): string {
 
 /** A reel traded in the thread, pasted onto the message as its own small card. */
 function SharedCard({ url }: { url: string }) {
+  if (!/^https?:\/\//i.test(url)) return null;
   return (
     <a
       href={url}

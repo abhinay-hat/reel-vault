@@ -7,6 +7,13 @@ import {
   type NewItem,
 } from "./db";
 import { cacheMedia } from "./media";
+import { parseHttpUrl } from "./url-safety";
+
+function httpUrl(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const u = parseHttpUrl(raw);
+  return u ? u.toString() : null;
+}
 
 export const IG_BRIDGE_URL = process.env.IG_BRIDGE_URL ?? "http://127.0.0.1:8765";
 
@@ -26,6 +33,7 @@ export async function bridge(path: string, init?: RequestInit): Promise<unknown>
  */
 export async function convertToMarkdown(url: string): Promise<string | undefined> {
   try {
+    if (!httpUrl(url)) return undefined;
     const r = await bridge("/convert", { method: "POST", body: JSON.stringify({ url }) });
     if (
       r && typeof r === "object" &&
@@ -90,7 +98,7 @@ export async function storeGathered(items: GatheredItem[]): Promise<StoreResult>
   for (const g of items) {
     try {
       if (g.type === "reel" || g.type === "post") {
-        const url = g.permalink ?? g.url;
+        const url = httpUrl(g.permalink ?? g.url);
         if (!url) { res.skipped++; continue; }
         const item: NewItem = {
           url, source: "instagram",
@@ -107,14 +115,14 @@ export async function storeGathered(items: GatheredItem[]): Promise<StoreResult>
         await upsertItem(item);
         res.items++;
       } else if (g.type === "dm_share") {
-        const url = g.permalink ?? g.url;
+        const url = httpUrl(g.permalink ?? g.url);
         const threadId = g.thread_id ?? "unknown";
         const convId = await ensureConv(threadId, g.thread_title, g.from);
         const inserted = await insertMessage({
           conversation_id: convId,
           external_id: `${g.from_id ?? g.from ?? "?"}:${g.timestamp ?? ""}:${url ?? ""}`,
           sender: g.from ?? "unknown", content: g.title ?? null,
-          sent_at: g.timestamp ?? new Date().toISOString(), shared_url: url ?? null,
+          sent_at: g.timestamp ?? new Date().toISOString(), shared_url: url,
         });
         if (inserted) res.messages++;
         if (url) {
@@ -134,7 +142,7 @@ export async function storeGathered(items: GatheredItem[]): Promise<StoreResult>
           res.items++;
         }
       } else if (g.type === "dm_link" || g.type === "article") {
-        const url = g.url ?? g.permalink;
+        const url = httpUrl(g.url ?? g.permalink);
         if (!url) { res.skipped++; continue; }
         await upsertItem({
           url, source: "article", title: g.ig_title || g.title || url,

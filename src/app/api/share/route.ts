@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { parseOpenGraph, detectSource } from "@/lib/metadata";
 import { upsertItem } from "@/lib/db";
 import { cacheMedia } from "@/lib/media";
+import { assertPublicHttpUrl, safeFetchBuffer } from "@/lib/url-safety";
+import { timingSafeEqualString } from "@/lib/passcode";
 
 // Token-authenticated capture endpoint for the iOS Shortcut (and any other
 // external pusher). iOS has no PWA share_target, so the share sheet path is:
@@ -19,7 +21,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "share_disabled", detail: "Set SHARE_TOKEN in .env.local to enable share capture." }, { status: 503 });
   }
   const auth = req.headers.get("authorization") ?? "";
-  if (auth !== `Bearer ${token}`) {
+  const want = `Bearer ${token}`;
+  if (!timingSafeEqualString(auth, want)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
@@ -44,6 +47,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "no_url", detail: "No http(s) URL found in the shared content." }, { status: 400 });
   }
   const url = match[0];
+  try {
+    await assertPublicHttpUrl(url);
+  } catch {
+    return NextResponse.json({ error: "url_not_allowed" }, { status: 400 });
+  }
   const source = detectSource(url);
 
   // Best-effort title/thumbnail; Instagram often serves a login wall to
@@ -52,12 +60,13 @@ export async function POST(req: NextRequest) {
   let title = "Shared link";
   let thumbnail: string | null = null;
   try {
-    const res = await fetch(url, {
+    const { status, buffer } = await safeFetchBuffer(url, {
       headers: { "User-Agent": "Mozilla/5.0 (compatible; ReelVault/1.0)" },
-      signal: AbortSignal.timeout(8000),
+      timeoutMs: 8000,
+      maxBytes: 2_000_000,
     });
-    if (res.ok) {
-      const meta = parseOpenGraph(await res.text());
+    if (status >= 200 && status < 300) {
+      const meta = parseOpenGraph(buffer.toString("utf8"));
       if (meta.title) title = meta.title;
       if (meta.thumbnail) thumbnail = meta.thumbnail;
     }

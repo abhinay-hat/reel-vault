@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, writeFile, access } from "node:fs/promises";
 import path from "node:path";
+import { safeFetchBuffer } from "./url-safety";
 
 /**
  * Local media cache.
@@ -66,17 +67,9 @@ export async function cacheMedia(
 ): Promise<string | null> {
   if (!url) return null;
 
-  let parsed: URL;
+  const cap = kind === "video" ? MAX_VIDEO_BYTES : MAX_BYTES;
   try {
-    parsed = new URL(url);
-  } catch {
-    return null;
-  }
-  // Only ever reach out over http(s); never file:, data:, or anything else.
-  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return null;
-
-  try {
-    const res = await fetch(url, {
+    const { status, headers, buffer } = await safeFetchBuffer(url, {
       headers: {
         // Instagram's CDN rejects requests with no UA and no referer.
         "User-Agent":
@@ -85,23 +78,21 @@ export async function cacheMedia(
         Accept: kind === "video" ? "video/*,*/*" : "image/avif,image/webp,image/*,*/*",
       },
       // A thumbnail that takes 20s is broken; a video that takes 20s is normal.
-      signal: AbortSignal.timeout(kind === "video" ? 120_000 : 20_000),
+      timeoutMs: kind === "video" ? 120_000 : 20_000,
+      maxBytes: cap,
     });
-    if (!res.ok) return null;
+    if (status < 200 || status >= 300) return null;
 
-    const type = (res.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
+    const type = (headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
     const ext = EXT_BY_TYPE[type];
     if (!ext) return null;
-
-    const cap = kind === "video" ? MAX_VIDEO_BYTES : MAX_BYTES;
-    const buf = Buffer.from(await res.arrayBuffer());
-    if (buf.byteLength === 0 || buf.byteLength > cap) return null;
+    if (buffer.byteLength === 0) return null;
 
     // Content-addressed: the same picture shared into two threads is stored once.
-    const name = `${createHash("sha256").update(buf).digest("hex").slice(0, 32)}.${ext}`;
+    const name = `${createHash("sha256").update(buffer).digest("hex").slice(0, 32)}.${ext}`;
 
     await mkdir(MEDIA_DIR, { recursive: true });
-    await writeFile(mediaPath(name), buf);
+    await writeFile(mediaPath(name), buffer);
     return name;
   } catch {
     return null;
