@@ -60,9 +60,19 @@ pipeline/.venv/
 pipeline/tessdata/
 pipeline/**/__pycache__/
 
-# agent skills (installed via `npx skills add`, symlinked into .claude/skills)
+# agent / AI-tool instruction files (keep out of the public repo)
 /.agents/
-/.claude/skills/
+/.claude/
+/.impeccable/
+/.serena/
+/.archify/
+/.code-review-graph/
+/docs/superpowers/
+/docs/claude/
+CLAUDE.md
+AGENTS.md
+GEMINI.md
+skills-lock.json
 .gstack/
 
 # vite
