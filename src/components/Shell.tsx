@@ -1,8 +1,13 @@
+"use client";
+
+import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { MenuBar, StackContents } from "@/components/NavLinks";
 import StackState from "@/components/StackState";
 import Trail from "@/components/Trail";
 import { StackIcon } from "@/components/icons";
+import { BUTTON_SMALL } from "@/components/stack";
 
 /**
  * The stack's frame: a menu bar across the top, the state line under it, the
@@ -19,6 +24,21 @@ export function Shell({
   /** Shown in the rail header when the caller already knows the total. */
   cardCount?: number | null;
 }) {
+  const router = useRouter();
+  const [loggingOut, setLoggingOut] = useState(false);
+
+  async function logout() {
+    if (loggingOut) return;
+    setLoggingOut(true);
+    try {
+      await fetch("/api/logout", { method: "POST" });
+    } catch {
+      /* clear UI anyway */
+    }
+    router.push("/login");
+    setLoggingOut(false);
+  }
+
   return (
     <div className="flex min-h-full flex-col">
       <a
@@ -38,7 +58,17 @@ export function Shell({
             <StackIcon />
             Reel Vault
           </Link>
-          <MenuBar />
+          <div className="flex items-center gap-2">
+            <MenuBar />
+            <button
+              type="button"
+              className={BUTTON_SMALL}
+              disabled={loggingOut}
+              onClick={() => void logout()}
+            >
+              {loggingOut ? "…" : "Log out"}
+            </button>
+          </div>
         </div>
         <StackState />
       </header>
@@ -65,7 +95,17 @@ export function Shell({
               Every card stays on this machine.
             </p>
             <p className="text-[12px]">
-              Reading and writing are the same mode: open a card and type on it.
+              <Link href="/add" className="underline">
+                Add
+              </Link>
+              {" · "}
+              <Link href="/ingest" className="underline">
+                Ingest
+              </Link>
+              {" · "}
+              <Link href="/bookmarklet" className="underline">
+                Bookmarklet
+              </Link>
             </p>
           </div>
         </div>

@@ -10,6 +10,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { isExpired } from "@/lib/media";
+import { safeHref } from "@/lib/url-safety";
 
 const IG_PERMALINK = /instagram\.com\/(?:[^/]+\/)?(reel|reels|p|tv)\/([A-Za-z0-9_-]+)/;
 
@@ -316,7 +317,7 @@ function rowToItem(r: ItemRow): Item {
       ? `/api/media/${r.media_file}`
       : isExpired(r.thumbnail)
         ? null
-        : r.thumbnail,
+        : safeHref(r.thumbnail),
     // A cached clip plays straight from disk. One that is only a remote URL is
     // still playable — /api/media/clip fetches and keeps it on first watch —
     // but a dead signature is not worth offering a player for.

@@ -350,7 +350,13 @@ def fetch_batch(
             if fr.caption:
                 patch["caption"] = fr.caption
             if fr.video_url:
-                patch["video"] = fr.video_url
+                try:
+                    from .url_safety import assert_public_http_url
+
+                    assert_public_http_url(fr.video_url)
+                    patch["video"] = fr.video_url
+                except ValueError:
+                    pass
             if fr.author:
                 patch["author"] = fr.author
             if fr.duration_s is not None:
@@ -358,7 +364,13 @@ def fetch_batch(
             if fr.music:
                 patch["music"] = fr.music
             if fr.image_urls and not row["thumbnail"]:
-                patch["thumbnail"] = fr.image_urls[0]
+                try:
+                    from .url_safety import assert_public_http_url
+
+                    assert_public_http_url(fr.image_urls[0])
+                    patch["thumbnail"] = fr.image_urls[0]
+                except ValueError:
+                    pass
             title = row["title"] or ""
             if fr.caption and (not title or title.startswith("Shared by ")):
                 patch["title"] = fr.caption.splitlines()[0][:120]

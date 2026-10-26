@@ -11,7 +11,7 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
-import requests
+from .url_safety import safe_get
 
 SCENE_THRESHOLD = 0.30
 MIN_SHOT_GAP = 0.2
@@ -25,19 +25,16 @@ MAX_DOWNLOAD_BYTES = 250 * 1024 * 1024
 
 
 def download(url: str, dest: Path) -> Optional[Path]:
-    """Stream URL to dest via .part then rename. Returns Path or None."""
+    """Stream URL to dest via .part then rename. Returns Path or None.
+
+    Rejects non-public http(s) and re-validates every redirect hop (SSRF).
+    """
     if dest.exists() and dest.stat().st_size > 1000:
         return dest
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_suffix(dest.suffix + ".part")
     try:
-        with requests.get(
-            url,
-            timeout=120,
-            stream=True,
-            headers={"User-Agent": UA},
-        ) as r:
-            r.raise_for_status()
+        with safe_get(url, timeout=120, headers={"User-Agent": UA}) as r:
             total = 0
             with open(tmp, "wb") as f:
                 for chunk in r.iter_content(1 << 16):

@@ -12,11 +12,14 @@ paid API key is needed.
 > Status: a personal project, built and tested on macOS (Apple Silicon). Rough
 > edges are expected; see [Feedback](#feedback--report-a-bug).
 
+![Reel Vault home with seeded demo cards](docs/screenshots/vault-home.png)
+
 ## Features
 
 - **One SQLite file** (`data/reel-vault.db`) via Node's built-in `node:sqlite`. No external database.
 - **Three ways in:** an optional Instagram sidecar (saved collections + DMs), an
-  Instagram data-export ZIP (`POST /api/ingest`), and a token-protected share
+  Instagram data-export ZIP (`/ingest` or `POST /api/ingest`), paste/`share_target`
+  capture on `/add`, a desktop `/bookmarklet`, and a token-protected share
   endpoint (`POST /api/share`) for an iOS Shortcut.
 - **Transcripts and on-screen text:** `pipeline/extract.py` fetches caption and
   video, then transcribes speech with Whisper and reads burned-in text with OCR,
@@ -64,16 +67,14 @@ Create `.env.local` in the repo root for any of the settings under
 ## Getting content into the vault
 
 1. **Instagram sidecar** (optional): start it (below), then log in and sync from `/connect`.
-2. **Instagram data export:** request "Your activity" as JSON from Instagram, then
+2. **Paste / share / bookmarklet:** open `/add` (also the Android PWA `share_target`),
+   or install the helper from `/bookmarklet`.
+3. **Instagram data export:** request "Your activity" as JSON from Instagram, then
+   use `/ingest` in the UI, or
    `curl --data-binary @instagram-export.zip http://localhost:3210/api/ingest`
-   (the ZIP is the raw request body)
-   (add the `rv_auth` cookie if `APP_PASSCODE` is set).
-3. **Share capture:** set `SHARE_TOKEN` and point an iOS Shortcut at
+   (the ZIP is the raw request body; add the `rv_auth` cookie if `APP_PASSCODE` is set).
+4. **Share capture (iOS):** set `SHARE_TOKEN` and point an iOS Shortcut at
    `POST /api/share`. Setup: [`docs/share-capture.md`](docs/share-capture.md).
-
-Note: the `/ingest`, `/add` and `/bookmarklet` pages and the Android PWA share
-target from the old Next.js version have not been ported to the current Vite
-app yet. The API endpoints above still work.
 
 ## Transcribe and enrich (the "search by what was said" part)
 
@@ -146,6 +147,8 @@ Tools: `search_vault`, `get_item`, `list_entities`, `find_actions`,
 | Var | Effect |
 |-----|--------|
 | `APP_PASSCODE` | Enables a shared-passcode gate on `/api/*` (unset = open) |
+| `AUTH_TTL_SECONDS` | Auth cookie lifetime (default 7 days); each login mints a fresh `v2` cookie |
+| `TRUST_PROXY` | Set to `1` only behind a trusted reverse proxy (honours `X-Forwarded-*`) |
 | `SHARE_TOKEN` | Enables the `/api/share` capture endpoint (unset = 503) |
 | `APIFY_TOKEN` | Enables the default Apify fetcher in `pipeline/extract.py --run` |
 | `LLM_PROVIDER` | `local` (default) or `groq` |
@@ -162,7 +165,9 @@ Tools: `search_vault`, `get_item`, `list_entities`, `find_actions`,
 | `ALLOWED_HOSTS` | Extra Host header names accepted (comma-separated), for LAN access |
 
 Sidecar-only (Python side): `IG_SESSION_FILE`, `IG_MIN_GATHER_INTERVAL_HOURS`,
-`IG_COOLDOWN_HOURS`, `IG_MEDIA_MIN_INTERVAL_SECONDS`.
+`IG_COOLDOWN_HOURS`, `IG_MEDIA_MIN_INTERVAL_SECONDS`, `IG_PROXY` (optional
+server-side proxy), `IG_ALLOW_CLIENT_PROXY` (must be `1`/`true` to honour a
+client-supplied `proxy` on `/login`; off by default).
 
 > **Network exposure:** the app and Vite dev server bind to `127.0.0.1` by
 > default. To listen on the LAN, set `HOST` (for example `0.0.0.0`) and
@@ -188,3 +193,9 @@ There are templates for bug reports and feature requests.
 
 Please do not paste Instagram session files, cookies, tokens or your database
 into an issue.
+
+## License
+
+MIT. See [LICENSE](LICENSE). Copyright (c) 2026 Abhinay Reddy Padidam.
+
+Third-party notices: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

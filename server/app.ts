@@ -50,7 +50,7 @@ app.use("*", securityMiddleware);
 app.use("/api/*", async (c, next) => {
   if (!process.env.APP_PASSCODE) return next();
   const p = c.req.path;
-  if (p === "/api/login" || p === "/api/share") return next();
+  if (p === "/api/login" || p === "/api/logout" || p === "/api/share") return next();
   if (await isValidAuthCookie(getCookie(c, PASSCODE_COOKIE))) return next();
   return c.json({ error: "unauthorized" }, 401);
 });

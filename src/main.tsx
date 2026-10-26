@@ -9,6 +9,9 @@ import Thread from "./app/messages/[id]/page";
 import ChatPage from "./app/chat/page";
 import ConnectPage from "./app/connect/page";
 import LoginPage from "./app/login/page";
+import AddPage from "./app/add/page";
+import IngestPage from "./app/ingest/page";
+import BookmarkletPage from "./app/bookmarklet/page";
 import { EmptyState } from "./components/EmptyState";
 import Shell from "./components/Shell";
 
@@ -23,6 +26,9 @@ createRoot(document.getElementById("root")!).render(
         <Route path="/chat" element={<ChatPage />} />
         <Route path="/connect" element={<ConnectPage />} />
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/add" element={<AddPage />} />
+        <Route path="/ingest" element={<IngestPage />} />
+        <Route path="/bookmarklet" element={<BookmarkletPage />} />
         <Route
           path="*"
           element={

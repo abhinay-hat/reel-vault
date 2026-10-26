@@ -8,6 +8,7 @@ export async function POST(req: NextRequest) {
     const result = await new ExportConnector().ingest(buf);
     return NextResponse.json(result);
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 });
+    console.error("[/api/ingest]", e);
+    return NextResponse.json({ error: "ingest_failed" }, { status: 500 });
   }
 }

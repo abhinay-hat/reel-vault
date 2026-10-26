@@ -100,17 +100,18 @@ export async function storeGathered(items: GatheredItem[]): Promise<StoreResult>
       if (g.type === "reel" || g.type === "post") {
         const url = httpUrl(g.permalink ?? g.url);
         if (!url) { res.skipped++; continue; }
+        const thumb = httpUrl(g.thumbnail_url);
         const item: NewItem = {
           url, source: "instagram",
           title: g.caption_text?.slice(0, 120) || (g.type === "reel" ? "Saved reel" : "Saved post"),
-          author: g.author ?? null, thumbnail: g.thumbnail_url ?? null, summary: null,
+          author: g.author ?? null, thumbnail: thumb, summary: null,
           category: g.type === "reel" ? "Reels" : "Saved", tags: [], notes: null, origin: "saved",
           created_at: g.taken_at ?? undefined,
-          video: g.video_url ?? null,
+          video: httpUrl(g.video_url),
           // Copy the bytes now, while the signed URL is still valid. Doing this
           // at read time instead is what left the first 198 items pointing at
           // dead links.
-          media_file: await cacheMedia(g.thumbnail_url, "thumb"),
+          media_file: await cacheMedia(thumb, "thumb"),
         };
         await upsertItem(item);
         res.items++;
@@ -129,14 +130,14 @@ export async function storeGathered(items: GatheredItem[]): Promise<StoreResult>
           // A shared reel has two people: whoever posted it and whoever sent
           // it. The card is about the reel, so the caption is its title and the
           // original poster is its author; the sender is recorded on the message.
-          const thumb = g.thumbnail_url ?? g.preview_url ?? null;
+          const thumb = httpUrl(g.thumbnail_url) ?? httpUrl(g.preview_url);
           await upsertItem({
             url, source: "instagram", title: g.title?.slice(0, 120) || `Shared by ${g.from ?? "someone"}`,
             author: g.author ?? g.from ?? null, thumbnail: thumb, summary: null,
             category: "Shared in DMs", tags: [], notes: null, origin: "dm_shared",
             // Prefer the reel's own date; fall back to when it was sent.
             created_at: g.taken_at ?? g.timestamp ?? undefined,
-            video: g.video_url ?? null,
+            video: httpUrl(g.video_url),
             media_file: await cacheMedia(thumb, "thumb"),
           });
           res.items++;

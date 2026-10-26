@@ -14,14 +14,16 @@ import ipaddress
 import os
 import re
 import socket
+import tempfile
 import threading
 import traceback
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
+import requests
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -44,6 +46,12 @@ except Exception:  # pragma: no cover - older versions
 SESSION_FILE = Path(os.environ.get("IG_SESSION_FILE", "./ig_session.json"))
 URL_RE = re.compile(r"https?://[^\s\"'<>]+")
 _ALLOWED_HOSTS = {"127.0.0.1", "localhost", "::1"}
+# Client-supplied proxy on /login is ignored unless this flag is set. Prefer
+# IG_PROXY for a server-configured hop when you need one.
+_ALLOW_CLIENT_PROXY = os.environ.get("IG_ALLOW_CLIENT_PROXY", "").strip().lower() in (
+    "1", "true", "yes",
+)
+_SERVER_PROXY = (os.environ.get("IG_PROXY") or "").strip() or None
 
 
 def _host_ok(host_header: str | None) -> bool:
@@ -203,6 +211,13 @@ def _in_range(dt: Optional[datetime], lo: Optional[datetime], hi: Optional[datet
     if hi and dt > hi:
         return False
     return True
+
+
+def _effective_proxy(client_proxy: Optional[str]) -> Optional[str]:
+    """Resolve proxy for a new Client. Client body is ignored by default."""
+    if _ALLOW_CLIENT_PROXY and client_proxy:
+        return client_proxy.strip() or None
+    return _SERVER_PROXY
 
 
 def _make_client(proxy: Optional[str]) -> Client:
@@ -433,9 +448,11 @@ def login(req: LoginReq) -> dict[str, Any]:
         #    for a specific (different) account. A username/password submit is an
         #    explicit intent to log in as that account, so we skip the cache and
         #    let the credentialed login below decide.
+        proxy = _effective_proxy(req.proxy)
+
         if not requested and not req.sessionid and SESSION_FILE.exists():
             try:
-                cl = _make_client(req.proxy)
+                cl = _make_client(proxy)
                 cl.load_settings(SESSION_FILE)
                 cl.get_timeline_feed()
                 out = _finish(cl)
@@ -453,7 +470,7 @@ def login(req: LoginReq) -> dict[str, Any]:
                     and not req.verification_code):
                 return {"ok": True, "user_id": _state.get("user_id"),
                         "username": _state.get("username"), "from_cache": True}
-            cl = _state.get("pending") or _make_client(req.proxy)
+            cl = _state.get("pending") or _make_client(proxy)
             try:
                 cl.login(req.username, req.password,
                          verification_code=(req.verification_code or ""))
@@ -473,7 +490,7 @@ def login(req: LoginReq) -> dict[str, Any]:
             if "sessionid=" in raw:
                 raw = raw.split("sessionid=", 1)[1].split(";", 1)[0].strip()
             sid = unquote(raw)
-            cl = _make_client(req.proxy)
+            cl = _make_client(proxy)
             cl.login_by_sessionid(sid)
             return _finish(cl)
 
@@ -491,6 +508,7 @@ def login(req: LoginReq) -> dict[str, Any]:
         return {"ok": False, "error": "rate_limited", "detail": "Instagram throttled the login. Wait a few minutes and try again."}
     except Exception as e:  # noqa: BLE001
         # The new bloks challenges can surface as a generic exception too.
+        # Never return exception text to the client (paths / internals leak).
         msg = f"{type(e).__name__}: {e}"
         if "challenge" in msg.lower() or "STEP_NAME" in msg:
             _state.pop("pending", None)
@@ -511,8 +529,8 @@ def account_info() -> dict[str, Any]:
     except LoginRequired:
         _mark_session_expired("LoginRequired")
         return {"logged_in": False, "error": "login_required"}
-    except Exception as e:  # noqa: BLE001
-        return {"logged_in": False, "error": f"{type(e).__name__}: {e}"}
+    except Exception:  # noqa: BLE001
+        return {"logged_in": False, "error": "account_error"}
 
 
 @app.get("/media/{shortcode}")
@@ -590,8 +608,8 @@ def collections() -> dict[str, Any]:
              "media_count": getattr(c, "media_count", None)} for c in cols]}
     except LoginRequired:
         return {"error": "login_required"}
-    except Exception as e:  # noqa: BLE001
-        return {"error": f"{type(e).__name__}: {e}"}
+    except Exception:  # noqa: BLE001
+        return {"error": "lookup_failed"}
 
 
 @app.get("/threads")
@@ -618,8 +636,8 @@ def threads(amount: int = 50, box: str = "") -> dict[str, Any]:
         return {"threads": out}
     except LoginRequired:
         return {"error": "login_required"}
-    except Exception as e:  # noqa: BLE001
-        return {"error": f"{type(e).__name__}: {e}"}
+    except Exception:  # noqa: BLE001
+        return {"error": "lookup_failed"}
 
 
 def _extract_share(m: Any) -> tuple[str, Optional[str], Optional[str], Optional[str], dict[str, Any]]:
@@ -815,9 +833,10 @@ def _run_gather(job_id: str, req: GatherReq) -> None:
         job["status"] = "error"
         job["error"] = "challenge_required_cooldown"
         job["detail"] = "Instagram raised a security challenge. Resolve it in the Instagram app; the bridge will refuse requests for a while."
-    except Exception as e:  # noqa: BLE001
+    except Exception:  # noqa: BLE001
         job["status"] = "error"
-        job["error"] = f"{type(e).__name__}: {e}"
+        job["error"] = "gather_failed"
+        # Keep the traceback server-side only (never returned by /gather/{id}).
         job["trace"] = traceback.format_exc()
 
 
@@ -861,6 +880,39 @@ class ConvertReq(BaseModel):
     url: str
 
 
+def _safe_fetch_bytes(url: str, max_bytes: int = 2_000_000, max_hops: int = 5) -> bytes:
+    """Fetch a public URL, re-validating every redirect hop (SSRF defense)."""
+    current = url
+    for _ in range(max_hops):
+        if not _public_http_url(current):
+            raise ValueError("url_not_allowed")
+        with requests.get(
+            current,
+            allow_redirects=False,
+            timeout=20,
+            stream=True,
+            headers={"User-Agent": "ReelVault-bridge/1.0"},
+        ) as resp:
+            if resp.is_redirect or resp.status_code in (301, 302, 303, 307, 308):
+                loc = resp.headers.get("Location")
+                if not loc:
+                    raise ValueError("bad_redirect")
+                current = urljoin(current, loc)
+                continue
+            resp.raise_for_status()
+            chunks: list[bytes] = []
+            total = 0
+            for block in resp.iter_content(64 * 1024):
+                if not block:
+                    continue
+                total += len(block)
+                if total > max_bytes:
+                    raise ValueError("body_too_large")
+                chunks.append(block)
+            return b"".join(chunks)
+    raise ValueError("too_many_redirects")
+
+
 @app.post("/convert")
 def convert(req: ConvertReq) -> dict[str, Any]:
     """Convert a public http(s) URL to Markdown via markitdown.
@@ -869,6 +921,8 @@ def convert(req: ConvertReq) -> dict[str, Any]:
     markitdown is imported lazily so the service boots even if it is missing.
     Markdown is truncated to ~8 000 chars to keep response payloads sane.
     Local paths and private IPs are rejected (SSRF / file-read defense).
+    Content is fetched with redirect revalidation so MarkItDown never follows
+    an unchecked hop to loopback/metadata.
     """
     if not _public_http_url(req.url):
         return {"ok": False, "error": "url_not_allowed"}
@@ -876,12 +930,30 @@ def convert(req: ConvertReq) -> dict[str, Any]:
         from markitdown import MarkItDown  # type: ignore[import]
     except ImportError:
         return {"ok": False, "error": "markitdown_not_installed"}
+    tmp_path: Optional[str] = None
     try:
+        raw = _safe_fetch_bytes(req.url)
+        # Write bytes we fetched ourselves; never pass an attacker path to MarkItDown.
+        with tempfile.NamedTemporaryFile(suffix=".html", delete=False) as tmp:
+            tmp.write(raw)
+            tmp_path = tmp.name
         md = MarkItDown()
-        result = md.convert(req.url)
+        result = md.convert(tmp_path)
         text = result.text_content or ""
         if len(text) > 8000:
             text = text[:8000]
         return {"ok": True, "markdown": text}
+    except ValueError as e:
+        if str(e) == "url_not_allowed":
+            return {"ok": False, "error": "url_not_allowed"}
+        return {"ok": False, "error": "convert_failed"}
+    except (OSError, requests.RequestException):
+        return {"ok": False, "error": "convert_failed"}
     except Exception:  # noqa: BLE001
         return {"ok": False, "error": "convert_failed"}
+    finally:
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
