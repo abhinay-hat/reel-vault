@@ -1,5 +1,5 @@
 @echo off
-rem Windows/RTX box: Next app on :3210 using Ollama on the 5090 for enrichment.
+rem Windows/RTX box: Vite + Hono app on :3210 using Ollama on the 5090 for enrichment.
 set "PATH=C:\Windows\System32;C:\Windows;C:\Program Files\nodejs;C:\Program Files\Git\cmd"
 set "LLM_PROVIDER=local"
 set "LLM_BASE_URL=http://127.0.0.1:11434/v1"

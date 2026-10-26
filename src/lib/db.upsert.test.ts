@@ -15,8 +15,8 @@ describe("upsertItem re-sync", () => {
     const first = await upsertItem({
       url: "https://www.instagram.com/reel/ABC/",
       source: "instagram",
-      title: "Shared by 7456093337",
-      author: "7456093337",
+      title: "Shared by 1000000000",
+      author: "1000000000",
       thumbnail: null,
       summary: null,
       category: "Shared in DMs",

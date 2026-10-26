@@ -6,7 +6,16 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 export default defineConfig({
-  test: { environment: "node", passWithNoTests: true },
+  test: {
+    environment: "node",
+    passWithNoTests: true,
+    exclude: [
+      "**/node_modules/**",
+      "**/dist/**",
+      "**/.archify/**",
+      "**/.code-review-graph/**",
+    ],
+  },
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),

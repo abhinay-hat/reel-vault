@@ -1,167 +1,190 @@
-<div align="center">
+# Reel Vault
 
-# ▤ Reel Vault
+A local-first personal vault for the Instagram reels, posts, DM-shared links and
+articles you save. Everything lives in a single SQLite file on your machine.
 
-**Everything you saved on Instagram, finally findable.**
+Saved reels can be transcribed, OCR'd, summarised and tagged so you can search
+by what was actually said in them, not just by the caption. That happens in two
+batch steps you run yourself (extract, then enrich), not automatically the
+moment you save something. By default both steps run on local models, so no
+paid API key is needed.
 
-A local-first vault for your saved reels, posts and the links friends send you in DMs —
-searchable by what the video actually *says*, not just its caption.
+> Status: a personal project, built and tested on macOS (Apple Silicon). Rough
+> edges are expected; see [Feedback](#feedback--report-a-bug).
 
-One SQLite file. Your machine. No cloud account.
+## Features
 
-![Node 24](https://img.shields.io/badge/node-24%2B-000?style=flat-square)
-![Vite + React 19](https://img.shields.io/badge/vite%20%2B%20react-19-000?style=flat-square)
-![Hono](https://img.shields.io/badge/api-hono-000?style=flat-square)
-![SQLite](https://img.shields.io/badge/db-sqlite%20(node%3Asqlite)-000?style=flat-square)
-![MCP](https://img.shields.io/badge/claude-MCP%20server-000?style=flat-square)
+- **One SQLite file** (`data/reel-vault.db`) via Node's built-in `node:sqlite`. No external database.
+- **Three ways in:** an optional Instagram sidecar (saved collections + DMs), an
+  Instagram data-export ZIP (`POST /api/ingest`), and a token-protected share
+  endpoint (`POST /api/share`) for an iOS Shortcut.
+- **Transcripts and on-screen text:** `pipeline/extract.py` fetches caption and
+  video, then transcribes speech with Whisper and reads burned-in text with OCR,
+  all locally.
+- **AI enrichment:** a local LLM (or optional free Groq models) writes a
+  summary, category, tags, named entities and action items for each item.
+- **Search:** the vault search matches titles, captions, summaries,
+  transcripts and OCR text. `/chat` answers questions over the vault, citing items.
+- **MCP server:** read-only, zero-dependency, so any MCP client (Claude Code,
+  Claude Desktop, etc.) can query your vault.
+- **Optional passcode gate** for the whole API.
 
-<img src=".impeccable/review/desktop.png" alt="Reel Vault: a 1-bit HyperCard-style stack of saved reels with search and filters" width="820">
+## What needs what
 
-</div>
+| Step | Runs on | Needs |
+|------|---------|-------|
+| Web app, search, MCP server | Node 24+ | nothing else |
+| Instagram sidecar (optional) | Python 3 | your Instagram login (see the warning below) |
+| Fetch caption + video for a reel | Apify Free actor (default) or the sidecar | `APIFY_TOKEN` (free Apify account), or the sidecar running |
+| Transcription | mlx-whisper (Apple Silicon) / faster-whisper (elsewhere), local | `./pipeline/setup.sh`, no key |
+| OCR | Apple Vision + Tesseract (macOS) / RapidOCR (elsewhere), local | `./pipeline/setup.sh`, no key |
+| Summary, category, tags | local OpenAI-compatible server (default `mlx_lm.server` with Qwen3-4B) | no key; or `LLM_PROVIDER=groq` + `GROQ_API_KEY` |
 
----
+Without any of the optional pieces you still get the app, manual imports, search
+over titles/captions, and the MCP server. Items simply stay unenriched.
 
-## Why
+## Requirements
 
-You save a reel about a scholarship deadline, an editing trick, a recipe. Three months later
-you can't find it: Instagram search doesn't look inside saved posts, and DM-shared reels arrive
-as bare links with no caption at all.
+- **Node 24+**: the data layer uses the built-in `node:sqlite` module.
+- **Python 3.11 or 3.12**: only for the extraction pipeline or the Instagram sidecar.
+- **Homebrew** (macOS): `pipeline/setup.sh` uses it to install `ffmpeg` and `tesseract`.
 
-Reel Vault pulls them into one place, **transcribes and reads them**, and lets you ask
-*"that reel about the Japanese visa"* — in the app, or straight from Claude.
-
-## What it does
-
-| | |
-|---|---|
-| **Collect** | Saved reels and posts, plus every reel shared inside your DM threads |
-| **Extract** | Caption, keyframes, on-screen text (OCR, incl. Hindi and Telugu) and the spoken transcript (Whisper) |
-| **Understand** | A local LLM writes a summary, category, tags, named entities (films, tools, universities, job portals…) and action items |
-| **Find** | Full-text search across title, caption, transcript, on-screen text and entities |
-| **Ask** | `/chat`: questions answered from your own reels, with the source cards |
-| **Reuse** | An MCP server so Claude can search your vault from any conversation |
-
-## How it works
-
-```mermaid
-flowchart LR
-  IG[Instagram<br/>saved + DMs] -->|ig-bridge sidecar<br/>127.0.0.1 only| DB[(SQLite<br/>data/reel-vault.db)]
-  DB --> EX[pipeline/extract.py<br/>fetch · ffmpeg · OCR · Whisper]
-  EX --> DB
-  DB --> AI[local LLM enrichment<br/>summary · tags · entities]
-  AI --> DB
-  DB --> APP[Vite + React app<br/>Hono API :3210]
-  DB --> MCP[MCP server<br/>read-only]
-  MCP --> CL[Claude]
-```
-
-Every step is idempotent and resumable: items move `pending → fetched → transcribed → enriched`,
-so a crash or a closed laptop just means the next run picks up where it stopped.
-
-## Quick start
-
-Requires **Node 24+** (the data layer uses the built-in `node:sqlite`).
+## Getting started
 
 ```bash
 npm install
-npm run dev        # app + API on http://localhost:3210
+npm run dev        # http://localhost:3210 (Vite SPA + Hono API in one process)
 ```
 
-On macOS you can double-click `start-reel-vault.command` instead.
+On macOS you can also double-click `start-reel-vault.command`.
 
-### 1 · Connect Instagram (optional sidecar)
+Create `.env.local` in the repo root for any of the settings under
+[Configuration](#configuration-envlocal). It is git-ignored.
+
+## Getting content into the vault
+
+1. **Instagram sidecar** (optional): start it (below), then log in and sync from `/connect`.
+2. **Instagram data export:** request "Your activity" as JSON from Instagram, then
+   `curl --data-binary @instagram-export.zip http://localhost:3210/api/ingest`
+   (the ZIP is the raw request body)
+   (add the `rv_auth` cookie if `APP_PASSCODE` is set).
+3. **Share capture:** set `SHARE_TOKEN` and point an iOS Shortcut at
+   `POST /api/share`. Setup: [`docs/share-capture.md`](docs/share-capture.md).
+
+Note: the `/ingest`, `/add` and `/bookmarklet` pages and the Android PWA share
+target from the old Next.js version have not been ported to the current Vite
+app yet. The API endpoints above still work.
+
+## Transcribe and enrich (the "search by what was said" part)
+
+Full walkthrough: [`docs/KNOWLEDGE-BASE.md`](docs/KNOWLEDGE-BASE.md).
 
 ```bash
-cd ig-bridge && ./start-bridge.command    # FastAPI on http://127.0.0.1:8765
+# 1. one-time install: ffmpeg, tesseract, Python venv, whisper + mlx packages
+./pipeline/setup.sh
+
+# 2. extract caption, transcript and OCR text (dry run first, then --run)
+pipeline/.venv/bin/python pipeline/extract.py --stats
+pipeline/.venv/bin/python pipeline/extract.py --limit 10 --run
+#    default fetcher is Apify: needs APIFY_TOKEN in .env.local
+#    to use the sidecar instead: --fetcher sidecar
+
+# 3. start the local LLM (first run downloads about 2.3 GB)
+pipeline/start-llm.command          # mlx_lm.server on 127.0.0.1:8090
+
+# 4. with the app running, enrich everything pending
+scripts/enrich-all.sh
 ```
 
-Then log in and sync from **/connect**.
+You can also enrich from the "Enrich with AI" button on `/connect`. Transcripts
+shorter than 15 characters (music-only reels) are discarded on purpose.
 
-> [!WARNING]
-> The sidecar uses Instagram's **private** mobile API (`instagrapi`). That breaks Instagram's
-> Terms of Service and can get an account checkpointed or banned. Use it only with your own
-> account, at your own risk. The session never leaves `127.0.0.1`, and sync is throttled hard
-> on purpose.
+## Optional: Instagram sidecar
 
-### 2 · Extract the content
+A local FastAPI service (`ig-bridge/`) that reads your saved collections and DMs
+through Instagram's private mobile API (`instagrapi`).
 
 ```bash
-./pipeline/setup.sh                 # one-time: Python deps, ffmpeg, Tesseract
-python pipeline/extract.py --run    # captions, keyframes, OCR, transcripts
+cd ig-bridge
+./start-bridge.command   # creates a venv, then runs on http://127.0.0.1:8765
 ```
 
-Heavy runs work well on a GPU box (`pipeline/run-windows.bat` uses faster-whisper on CUDA). Stages, fetchers and statuses are explained in [docs/KNOWLEDGE-BASE.md](docs/KNOWLEDGE-BASE.md).
+> **Read this before using the sidecar.**
+>
+> - It uses Instagram's **private, undocumented** API. That is against
+>   Instagram's Terms of Use.
+> - Instagram can checkpoint, lock or permanently ban the account you log in
+>   with. Built-in throttles (one gather per 20 hours, a 6 hour cooldown after
+>   any rate limit, 25 s between media fetches) reduce the risk; they do not
+>   remove it.
+> - Use it **only with your own account**, for personal use, at your own risk.
+>   Never use it on someone else's account or to collect other people's data.
+> - The saved session (`ig-bridge/ig_session.json`) is a full login credential.
+>   It is git-ignored and stays on `127.0.0.1`; never share or commit it.
+>
+> The safer paths are the official data export and share capture. The Apify
+> fetcher is a third-party scraper of public pages; check that its use fits
+> your situation too.
 
-### 3 · Enrich with a local LLM
+## MCP server
+
+`mcp/reel-vault-mcp.mjs` exposes the vault over stdio. It is read-only and has
+no npm dependencies.
 
 ```bash
-./pipeline/start-llm.command        # OpenAI-compatible mlx_lm.server (Qwen3-4B)
-./scripts/enrich-all.sh             # summaries, tags, entities, actions
+claude mcp add reel-vault -- node "$(pwd)/mcp/reel-vault-mcp.mjs"
 ```
 
-Set `LLM_PROVIDER=groq` to use Groq's free models instead.
+For other MCP clients, run `node /abs/path/to/mcp/reel-vault-mcp.mjs` as a stdio
+server. It reads `data/reel-vault.db` next to the repo, or `REEL_VAULT_DB`.
 
-## Ask Claude about your saves (MCP)
+Tools: `search_vault`, `get_item`, `list_entities`, `find_actions`,
+`list_categories`, `recent_items`, `vault_stats`.
 
-```bash
-claude mcp add reel-vault -- node /absolute/path/to/mcp/reel-vault-mcp.mjs
-```
+## Configuration (`.env.local`)
 
-Zero dependencies, **read-only by design**. Tools:
-
-`search_vault` · `get_item` · `list_entities` · `find_actions` · `list_categories` · `recent_items` · `vault_stats`
-
-> *"Which job portals have I saved?"* · *"List every anime from my saves."* · *"What did that reel say about the visa deadline?"*
-
-## Configuration
-
-Put these in `.env.local` (all optional):
-
-| Variable | Effect |
-|---|---|
-| `APP_PASSCODE` | Turns on a shared-passcode gate (unset = open app) |
-| `SHARE_TOKEN` | Enables `/api/share` for the iOS Shortcut / share target |
-| `APIFY_TOKEN` | Apify free fetcher for `extract.py --run` |
-| `LLM_PROVIDER` / `LLM_BASE_URL` / `LLM_MODEL` | `local` (default) or `groq`; model must be on the allow-list |
-| `GROQ_API_KEY` | Only when `LLM_PROVIDER=groq` |
-| `REEL_VAULT_DB` / `REEL_VAULT_MEDIA` | Database and media paths |
+| Var | Effect |
+|-----|--------|
+| `APP_PASSCODE` | Enables a shared-passcode gate on `/api/*` (unset = open) |
+| `SHARE_TOKEN` | Enables the `/api/share` capture endpoint (unset = 503) |
+| `APIFY_TOKEN` | Enables the default Apify fetcher in `pipeline/extract.py --run` |
+| `LLM_PROVIDER` | `local` (default) or `groq` |
+| `LLM_BASE_URL` | OpenAI-compatible base URL (default `http://127.0.0.1:8090/v1`, or Groq) |
+| `LLM_MODEL` | Must be on the allow-list in `src/lib/llm.ts` |
+| `GROQ_API_KEY` | Required only when `LLM_PROVIDER=groq` |
 | `REEL_VAULT_WHISPER_MODEL` | Whisper weights (default `mlx-community/whisper-small-mlx`) |
-| `KEEP_MEDIA` | Keep downloaded mp4s under `data/media/` |
-| `IG_BRIDGE_URL` | Sidecar URL (default `http://127.0.0.1:8765`) |
+| `KEEP_MEDIA` | Keep downloaded videos under `data/media/` |
+| `REEL_VAULT_DB` | SQLite file path (default `data/reel-vault.db`) |
+| `REEL_VAULT_MEDIA` | Media directory override |
+| `IG_BRIDGE_URL` | Sidecar base URL (default `http://127.0.0.1:8765`) |
+| `PORT` | Production server port (default `3210`) |
+| `HOST` | Bind address (default `127.0.0.1`). Non-loopback binds require `APP_PASSCODE`. |
+| `ALLOWED_HOSTS` | Extra Host header names accepted (comma-separated), for LAN access |
+
+Sidecar-only (Python side): `IG_SESSION_FILE`, `IG_MIN_GATHER_INTERVAL_HOURS`,
+`IG_COOLDOWN_HOURS`, `IG_MEDIA_MIN_INTERVAL_SECONDS`.
+
+> **Network exposure:** the app and Vite dev server bind to `127.0.0.1` by
+> default. To listen on the LAN, set `HOST` (for example `0.0.0.0`) and
+> `APP_PASSCODE`; without a passcode a non-loopback bind is refused.
 
 ## Scripts
 
 ```bash
-npm run dev      # Vite dev server + API on :3210
-npm run build    # dist/ (SPA) + dist-server/index.js (Hono API + static)
-npm start        # production server on :3210
-npm test         # vitest
+npm run dev      # dev server on :3210
+npm run build    # dist/ (SPA) + dist-server/ (API)
+npm start        # production server on :3210, loads .env.local
+npm test         # vitest run
+npx tsc --noEmit # typecheck (no npm script for it)
 ```
 
-## Under the hood
+Pipeline tests: `pipeline/.venv/bin/python -m pytest pipeline/tests`.
 
-```
-src/            React 19 pages (src/app/**/page.tsx), components, lib (db, ai, llm, search)
-server/         Hono app; auto-mounts every src/app/api/**/route.ts
-ig-bridge/      Python FastAPI sidecar for Instagram (local only)
-pipeline/       extraction: fetch → ffmpeg keyframes → OCR → Whisper
-mcp/            zero-dependency MCP server over the same SQLite file
-```
+## Feedback / report a bug
 
-- **Stack:** Vite 8 · React 19 · react-router 8 · Tailwind v4 · Hono · `node:sqlite`
-- **Data:** one SQLite file; items upsert by URL, DM messages insert-or-ignore, so every import is safe to repeat
-- **Design:** a 1-bit HyperCard shoebox stack: black ink, white paper, dithered greys, and a vault that shows what's still blank instead of pretending it's complete
+Bugs, missing features and rough edges are all welcome. Please open an issue:
+[github.com/abhinay-hat/reel-vault/issues](https://github.com/abhinay-hat/reel-vault/issues).
+There are templates for bug reports and feature requests.
 
-## Privacy
-
-Your vault stays on your machine. No telemetry, no hosted backend. The only network calls are
-the ones you turn on: the local Instagram sidecar, the optional Apify fetcher, and Groq if you
-choose it over the local LLM.
-
-## Credits
-
-Parts of the offline media / OCR pipeline are ported from
-[reel-watcher](https://github.com/jakeb144/reel-watcher) (MIT). See
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-
-<div align="center"><sub>Built for one person who saves far more than they ever rewatch.</sub></div>
+Please do not paste Instagram session files, cookies, tokens or your database
+into an issue.
