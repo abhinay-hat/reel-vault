@@ -95,10 +95,9 @@ export async function POST(req: NextRequest) {
     } catch (err) {
       console.error("[/api/enrich-pending] LLM error:", err);
       failed++;
-      const reason = err instanceof Error ? err.message : String(err);
       await updateItem(it.id, {
         enrich_attempts: (it.enrich_attempts ?? 0) + 1,
-        content_error: `enrich: ${reason}`.slice(0, 300),
+        content_error: "enrich_llm_failed",
       });
     }
   }

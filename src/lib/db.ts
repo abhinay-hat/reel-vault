@@ -10,7 +10,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { isExpired } from "@/lib/media";
-import { safeHref } from "@/lib/url-safety";
+import { safeHref } from "@/lib/url-policy";
 
 const IG_PERMALINK = /instagram\.com\/(?:[^/]+\/)?(reel|reels|p|tv)\/([A-Za-z0-9_-]+)/;
 
@@ -601,6 +601,35 @@ export async function upsertItem(item: NewItem): Promise<Item> {
   return rowToItem(row);
 }
 
+const UPDATE_ITEM_COLS = new Set([
+  "url",
+  "source",
+  "title",
+  "author",
+  "thumbnail",
+  "summary",
+  "category",
+  "tags",
+  "notes",
+  "origin",
+  "created_at",
+  "media_file",
+  "video",
+  "video_file",
+  "caption",
+  "transcript",
+  "ocr_text",
+  "entities",
+  "actions",
+  "content_status",
+  "content_error",
+  "keyframe_file",
+  "duration_s",
+  "music",
+  "fetcher",
+  "enrich_attempts",
+]);
+
 export async function updateItem(id: string, patch: Partial<NewItem>): Promise<void> {
   const d = db();
   const sets: string[] = [];
@@ -608,6 +637,7 @@ export async function updateItem(id: string, patch: Partial<NewItem>): Promise<v
   const jsonCols = new Set(["tags", "entities", "actions"]);
   for (const [k, v] of Object.entries(patch)) {
     if (v === undefined) continue;
+    if (!UPDATE_ITEM_COLS.has(k)) continue;
     sets.push(`${k} = ?`);
     vals.push(jsonCols.has(k) ? JSON.stringify(v) : v);
   }

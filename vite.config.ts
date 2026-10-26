@@ -6,6 +6,15 @@ import path from "node:path";
 
 const src = path.resolve(import.meta.dirname, "src");
 
+/** Mirror src/lib/http-guards isLanBind (keep vite.config free of .ts imports for tsc). */
+function isLanBind(host: string | undefined): boolean {
+  const h = (host ?? "127.0.0.1").trim().toLowerCase();
+  if (!h || h === "127.0.0.1" || h === "localhost" || h === "::1" || h === "[::1]") {
+    return false;
+  }
+  return true;
+}
+
 // The API runs inside Vite's dev server: one process, one port, and server code
 // reloads on save. Loaded per request through ssrLoadModule (cached until a file
 // changes), so @/ aliases and TypeScript work exactly as in the browser build.
@@ -30,6 +39,13 @@ function api(): Plugin {
 export default defineConfig(({ mode }) => {
   // Server code reads process.env (APIFY_TOKEN, LLM_*, APP_PASSCODE …) as it did under Next.
   Object.assign(process.env, loadEnv(mode, import.meta.dirname, ""));
+  const host = (process.env.HOST || "127.0.0.1").trim() || "127.0.0.1";
+  // Match server/index.ts: never expose the API on a LAN bind without a passcode.
+  if (isLanBind(host) && !process.env.APP_PASSCODE) {
+    throw new Error(
+      "Refusing to bind Vite to non-loopback HOST without APP_PASSCODE. Set APP_PASSCODE or use HOST=127.0.0.1.",
+    );
+  }
   return {
     plugins: [react(), tailwindcss(), api()],
     resolve: {
@@ -43,10 +59,10 @@ export default defineConfig(({ mode }) => {
     // Default loopback. Set HOST (and APP_PASSCODE) to expose on the LAN.
     server: {
       port: 3210,
-      host: process.env.HOST || "127.0.0.1",
+      host,
       strictPort: true,
     },
-    preview: { port: 3210, host: process.env.HOST || "127.0.0.1" },
+    preview: { port: 3210, host },
     // node:sqlite is loaded at runtime via process.getBuiltinModule; keep it out of bundling.
     ssr: { external: ["node:sqlite"] },
     build: { outDir: "dist" },

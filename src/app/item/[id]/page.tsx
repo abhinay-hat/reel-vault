@@ -11,6 +11,7 @@ import CardNav from "@/components/CardNav";
 import MarkCard from "@/components/MarkCard";
 import { ArrowLeftIcon } from "@/components/icons";
 import { BUTTON, PANEL, PANEL_HEADER } from "@/components/stack";
+import { safeHref } from "@/lib/url-policy";
 
 export default function ItemDetail() {
   const { id = "" } = useParams();
@@ -130,11 +131,14 @@ export default function ItemDetail() {
             )}
 
             <div className="border-t-2 border-dotted border-ink pt-4">
-              {/^https?:\/\//i.test(item.url) && (
-                <a href={item.url} target="_blank" rel="noreferrer" className={BUTTON}>
-                  Open the original
-                </a>
-              )}
+              {(() => {
+                const href = safeHref(item.url);
+                return href ? (
+                  <a href={href} target="_blank" rel="noreferrer" className={BUTTON}>
+                    Open the original
+                  </a>
+                ) : null;
+              })()}
             </div>
           </div>
         </article>

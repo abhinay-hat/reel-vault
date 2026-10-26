@@ -101,11 +101,23 @@ def queue(
     return list(con.execute(sql, params))
 
 
+_SAVE_COLS = frozenset({
+    "url", "source", "title", "author", "thumbnail", "summary", "category",
+    "tags", "notes", "origin", "created_at", "added_at", "media_file", "video",
+    "video_file", "caption", "transcript", "ocr_text", "entities", "actions",
+    "content_status", "content_error", "keyframe_file", "duration_s", "music",
+    "fetcher", "enrich_attempts",
+})
+
+
 def save(con: sqlite3.Connection, item_id: str, **fields: Any) -> None:
     if not fields:
         return
-    sets = ", ".join(f"{k} = ?" for k in fields)
-    con.execute(f"update items set {sets} where id = ?", (*fields.values(), item_id))
+    safe = {k: v for k, v in fields.items() if k in _SAVE_COLS}
+    if not safe:
+        return
+    sets = ", ".join(f"{k} = ?" for k in safe)
+    con.execute(f"update items set {sets} where id = ?", (*safe.values(), item_id))
     con.commit()
 
 

@@ -52,16 +52,17 @@ describe("passcode cookie", () => {
     expect(await isValidAuthCookie(next)).toBe(true);
   });
 
-  it("ignores X-Forwarded-For unless TRUST_PROXY=1", () => {
+  it("ignores X-Forwarded-For unless TRUST_PROXY=1; uses socket IP header", () => {
     const req = {
       headers: {
         get(name: string) {
           if (name === "x-forwarded-for") return "203.0.113.9";
+          if (name === "x-rv-client-ip") return "198.51.100.7";
           return null;
         },
       },
     };
-    expect(loginClientKey(req)).toBe("local");
+    expect(loginClientKey(req)).toBe("198.51.100.7");
     process.env.TRUST_PROXY = "1";
     expect(loginClientKey(req)).toBe("203.0.113.9");
   });

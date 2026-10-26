@@ -72,7 +72,11 @@ export async function llmComplete(prompt: string, maxTokens = 500): Promise<stri
     signal: AbortSignal.timeout(120_000),
   });
   if (!res.ok) {
-    throw new Error(`LLM ${res.status}: ${await res.text()}`);
+    // Log provider body server-side only; never put it in Error messages that
+    // may be persisted to content_error and returned on Item APIs.
+    const detail = await res.text().catch(() => "");
+    console.error(`[llm] provider ${res.status}: ${detail.slice(0, 500)}`);
+    throw new Error(`llm_http_${res.status}`);
   }
   const data = (await res.json()) as {
     choices?: { message?: { content?: string } }[];

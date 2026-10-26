@@ -21,12 +21,13 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin, urlparse, urlunparse
 
 import requests
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from requests.adapters import HTTPAdapter
 from instagrapi import Client
 from instagrapi.exceptions import (
     LoginRequired,
@@ -81,6 +82,31 @@ def _is_private_ip(ip: str) -> bool:
     )
 
 
+def _resolve_public_ips(host: str) -> list[str]:
+    """Resolve host and return addresses only if every one is public."""
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        pass
+    else:
+        return [] if _is_private_ip(host) else [host]
+    try:
+        infos = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+    except socket.gaierror:
+        return []
+    ips: list[str] = []
+    seen: set[str] = set()
+    for info in infos:
+        ip = info[4][0]
+        if ip in seen:
+            continue
+        seen.add(ip)
+        if _is_private_ip(ip):
+            return []
+        ips.append(ip)
+    return ips
+
+
 def _public_http_url(url: str) -> bool:
     """Reject file paths, file://, and http(s) URLs that resolve to private IPs."""
     if not url or url.startswith("/") or url.startswith("\\") or "://" not in url:
@@ -93,22 +119,34 @@ def _public_http_url(url: str) -> bool:
         return False
     if u.username or u.password or not u.hostname:
         return False
-    host = u.hostname
-    try:
-        # Literal IP?
-        if _is_private_ip(host):
-            return False
-    except Exception:
-        pass
-    try:
-        infos = socket.getaddrinfo(host, None)
-    except socket.gaierror:
+    host = u.hostname.lower()
+    if host in {"localhost", "metadata.google.internal"}:
         return False
-    for info in infos:
-        ip = info[4][0]
-        if _is_private_ip(ip):
-            return False
-    return True
+    return bool(_resolve_public_ips(host))
+
+
+class _PinnedIPAdapter(HTTPAdapter):
+    """Keep SNI/cert hostname when connecting via a literal IP URL."""
+
+    def __init__(self, server_hostname: str, **kwargs: Any):
+        self._server_hostname = server_hostname
+        super().__init__(**kwargs)
+
+    def init_poolmanager(self, *args: Any, **kwargs: Any) -> Any:
+        kwargs["server_hostname"] = self._server_hostname
+        kwargs["assert_hostname"] = self._server_hostname
+        return super().init_poolmanager(*args, **kwargs)
+
+
+def _url_with_pinned_ip(url: str, ip: str) -> tuple[str, str]:
+    u = urlparse(url)
+    assert u.hostname is not None
+    host_header = u.hostname if not u.port else f"{u.hostname}:{u.port}"
+    netloc = f"[{ip}]" if ":" in ip else ip
+    if u.port:
+        netloc = f"{netloc}:{u.port}"
+    pinned = urlunparse((u.scheme, netloc, u.path or "", u.params, u.query, u.fragment))
+    return pinned, host_header
 
 
 def _chmod_session() -> None:
@@ -881,35 +919,51 @@ class ConvertReq(BaseModel):
 
 
 def _safe_fetch_bytes(url: str, max_bytes: int = 2_000_000, max_hops: int = 5) -> bytes:
-    """Fetch a public URL, re-validating every redirect hop (SSRF defense)."""
+    """Fetch a public URL pinned to a validated IP; re-validate every redirect hop."""
     current = url
     for _ in range(max_hops):
         if not _public_http_url(current):
             raise ValueError("url_not_allowed")
-        with requests.get(
-            current,
-            allow_redirects=False,
-            timeout=20,
-            stream=True,
-            headers={"User-Agent": "ReelVault-bridge/1.0"},
-        ) as resp:
-            if resp.is_redirect or resp.status_code in (301, 302, 303, 307, 308):
-                loc = resp.headers.get("Location")
-                if not loc:
-                    raise ValueError("bad_redirect")
-                current = urljoin(current, loc)
-                continue
-            resp.raise_for_status()
-            chunks: list[bytes] = []
-            total = 0
-            for block in resp.iter_content(64 * 1024):
-                if not block:
+        parsed = urlparse(current)
+        assert parsed.hostname is not None
+        ips = _resolve_public_ips(parsed.hostname)
+        if not ips:
+            raise ValueError("url_not_allowed")
+        pinned_ip = next((ip for ip in ips if ":" not in ip), ips[0])
+        pinned_url, host_header = _url_with_pinned_ip(current, pinned_ip)
+        session = requests.Session()
+        if parsed.scheme == "https":
+            session.mount("https://", _PinnedIPAdapter(parsed.hostname))
+        try:
+            with session.get(
+                pinned_url,
+                allow_redirects=False,
+                timeout=20,
+                stream=True,
+                headers={
+                    "User-Agent": "ReelVault-bridge/1.0",
+                    "Host": host_header,
+                },
+            ) as resp:
+                if resp.is_redirect or resp.status_code in (301, 302, 303, 307, 308):
+                    loc = resp.headers.get("Location")
+                    if not loc:
+                        raise ValueError("bad_redirect")
+                    current = urljoin(current, loc)
                     continue
-                total += len(block)
-                if total > max_bytes:
-                    raise ValueError("body_too_large")
-                chunks.append(block)
-            return b"".join(chunks)
+                resp.raise_for_status()
+                chunks: list[bytes] = []
+                total = 0
+                for block in resp.iter_content(64 * 1024):
+                    if not block:
+                        continue
+                    total += len(block)
+                    if total > max_bytes:
+                        raise ValueError("body_too_large")
+                    chunks.append(block)
+                return b"".join(chunks)
+        finally:
+            session.close()
     raise ValueError("too_many_redirects")
 
 

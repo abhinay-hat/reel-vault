@@ -1,5 +1,7 @@
 import { Hono } from "hono";
+import type { Context } from "hono";
 import { getCookie } from "hono/cookie";
+import { getConnInfo } from "@hono/node-server/conninfo";
 import { NextRequest } from "@/shims/next-server";
 import { PASSCODE_COOKIE, isValidAuthCookie } from "@/lib/passcode";
 import { securityMiddleware } from "@/lib/http-guards";
@@ -22,19 +24,63 @@ function toPath(file: string): string {
 
 // Cap upload bodies (export ZIPs). Larger payloads are rejected before unzip.
 const MAX_BODY_BYTES = 80 * 1024 * 1024;
+/** Auth-exempt JSON routes do not need ZIP-sized bodies. */
+const AUTH_EXEMPT_BODY_BYTES = 64 * 1024;
+const AUTH_EXEMPT_PATHS = new Set(["/api/login", "/api/logout", "/api/share"]);
+
+function bodyLimitForPath(path: string): number {
+  return AUTH_EXEMPT_PATHS.has(path) ? AUTH_EXEMPT_BODY_BYTES : MAX_BODY_BYTES;
+}
+
+function tooLarge(): Error {
+  return Object.assign(new Error("body_too_large"), { status: 413 });
+}
 
 // @hono/node-server passes a lightweight request object, not an undici Request,
-// so `new Request(raw)` throws. Rebuild it from its parts. The body is buffered:
-// re-streaming it crashed undici ("ReadableStream is already closed"), and
-// bodies here are small JSON or one export ZIP. ponytail: stream if uploads get big.
-async function toNextRequest(raw: Request): Promise<NextRequest> {
-  const init: RequestInit = { method: raw.method, headers: raw.headers, signal: raw.signal };
+// so `new Request(raw)` throws. Rebuild it from its parts. Cap body size while
+// streaming so Content-Length spoofing / missing length cannot OOM the process.
+async function toNextRequest(raw: Request, c: Context, path: string): Promise<NextRequest> {
+  const headers = new Headers(raw.headers);
+  // Drop any client-supplied value; set from the real socket when available.
+  headers.delete("x-rv-client-ip");
+  try {
+    const addr = getConnInfo(c).remote.address;
+    if (addr) headers.set("x-rv-client-ip", addr);
+  } catch {
+    /* not running under the Node adapter (tests) */
+  }
+
+  const init: RequestInit = { method: raw.method, headers, signal: raw.signal };
   if (raw.method !== "GET" && raw.method !== "HEAD") {
-    const buf = await raw.arrayBuffer();
-    if (buf.byteLength > MAX_BODY_BYTES) {
-      throw Object.assign(new Error("body_too_large"), { status: 413 });
+    const limit = bodyLimitForPath(path);
+    const cl = raw.headers.get("content-length");
+    if (cl !== null) {
+      const n = Number(cl);
+      if (!Number.isFinite(n) || n < 0 || n > limit) throw tooLarge();
     }
-    init.body = buf;
+    if (!raw.body) {
+      init.body = new Uint8Array();
+    } else {
+      const reader = raw.body.getReader();
+      const chunks: Uint8Array[] = [];
+      let total = 0;
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (!value) continue;
+        total += value.byteLength;
+        if (total > limit) {
+          try {
+            await reader.cancel();
+          } catch {
+            /* ignore */
+          }
+          throw tooLarge();
+        }
+        chunks.push(value);
+      }
+      init.body = Buffer.concat(chunks.map((ch) => Buffer.from(ch)));
+    }
   }
   return new NextRequest(raw.url, init);
 }
@@ -127,7 +173,9 @@ for (const { path, mod } of routes) {
     if (!handler) continue;
     app.on(method, path, async (c) => {
       try {
-        return await handler(await toNextRequest(c.req.raw), { params: Promise.resolve(c.req.param()) });
+        return await handler(await toNextRequest(c.req.raw, c, path), {
+          params: Promise.resolve(c.req.param()),
+        });
       } catch (e) {
         if (e && typeof e === "object" && (e as { status?: number }).status === 413) {
           return c.json({ error: "body_too_large" }, 413);

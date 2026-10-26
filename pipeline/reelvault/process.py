@@ -190,7 +190,9 @@ def _process_video(
             transcript = whisper_transcribe(video)
             timings["whisper"] = time.time() - t_wh
         except Exception as e:  # noqa: BLE001
-            ocr_note = f"transcription failed: {e}"[:200]
+            # Opaque code for DB/API; log the real exception server-side only.
+            print(f"[process] transcription failed: {e}", flush=True)
+            ocr_note = "transcription_failed"
             transcript = ""
 
         kf_src = pick_keyframe(frames)

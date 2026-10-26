@@ -108,8 +108,9 @@ export async function isValidAuthCookie(
 }
 
 /**
- * Client IP for login rate limiting. Ignore X-Forwarded-* unless TRUST_PROXY=1
- * so a remote caller cannot rotate spoofed headers to bypass the budget.
+ * Client IP for login rate limiting. Prefer the socket address injected by the
+ * server as x-rv-client-ip. Ignore X-Forwarded-* unless TRUST_PROXY=1 so a
+ * remote caller cannot rotate spoofed headers to bypass the budget.
  */
 export function loginClientKey(req: {
   headers: { get(name: string): string | null };
@@ -118,10 +119,11 @@ export function loginClientKey(req: {
     return (
       req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
       req.headers.get("x-real-ip") ||
+      req.headers.get("x-rv-client-ip") ||
       "local"
     );
   }
-  return "local";
+  return req.headers.get("x-rv-client-ip") || "local";
 }
 
 /** Simple per-key sliding window for /api/login. */
